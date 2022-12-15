@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "MaxFuse"
+version = "0.0.1"
+authors = [
+  { name="Shuxiao Chen", email="shuxiaoc@gmail.com" },
+  { name="Bokai Zhu", email="bkzhu@stanford.edu" },
+]
+description = "Cross-modality matching of single cells via iterative fuzzy smoothed embedding"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/shuxiaoc/maxfuse"
+"Bug Tracker" = "https://github.com/shuxiaoc/maxfuse/issues"
