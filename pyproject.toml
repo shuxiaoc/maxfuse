@@ -16,6 +16,16 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
+dependencies = [
+    "igraph",
+    "leidenalg",
+    "numpy",
+    "pandas",
+    "scanpy",
+    "scipy",
+    "scikit-learn",
+    "matplotlib",
+]
 
 [project.urls]
 "Homepage" = "https://github.com/shuxiaoc/maxfuse"
