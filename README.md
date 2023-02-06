@@ -16,6 +16,11 @@ installation instruction here.
 
 linke to sphinx ?
 
-## Code arcive for [paper](https://www.biorxiv.org/content/10.1101/2023.01.12.523851v2)
+## Code arcive
 
-list where are the files
+The analysis presented in the [manuscript](https://www.biorxiv.org/content/10.1101/2023.01.12.523851v2) was also deposited in this GitHub repository, under this [folder](https://github.com/shuxiaoc/maxfuse/tree/main/Archieve). Note in the manuscript we used a development version of ```MaxFuse``` with slightly different grammar and can also be found there. If you require additional inforamtion on the analysis/data, please contact Zongming Ma (zongming@wharton.upenn.edu).
+
+## License
+
+```MaxFuse``` is under the [Academic Software License Agreement](https://github.com/shuxiaoc/maxfuse/blob/main/LICENSE), please use accordingly.
+
