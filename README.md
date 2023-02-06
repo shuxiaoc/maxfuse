@@ -6,7 +6,7 @@ MaxFuse is a Python package for integrating multi-modal single-cell data under l
 
 This work has been lead by Shuxiao Chen from [Zongming Lab](http://www-stat.wharton.upenn.edu/~zongming/) @Upenn and Bokai Zhu from [Nolan lab](https://web.stanford.edu/group/nolan/) @Stanford.
 
-<img src="[https://github.com/shuxiaoc/mario-py/blob/main/media/mario_flow.png](https://github.com/shuxiaoc/maxfuse/blob/main/media/Figure1-new.png)" width="800" height="280">
+<img src="https://github.com/shuxiaoc/maxfuse/blob/main/media/fig1.png" width="800" height="280">
 
 ## Getting started
 
