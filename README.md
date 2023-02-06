@@ -8,6 +8,14 @@ This work has been lead by Shuxiao Chen from [Zongming Lab](http://www-stat.whar
 
 <img src="https://github.com/shuxiaoc/maxfuse/blob/main/media/fig1.png" width="800" height="280">
 
-## Getting started
+## Installation
 
-Some instructions here.
+installation instruction here.
+
+## Usage
+
+linke to sphinx ?
+
+## Code arcive for [paper](https://www.biorxiv.org/content/10.1101/2023.01.12.523851v2)
+
+list where are the files
