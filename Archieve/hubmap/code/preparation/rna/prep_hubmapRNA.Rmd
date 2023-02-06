@@ -1,0 +1,271 @@
+---
+title: "prep_hubmapRNA"
+output: html_document
+---
+
+Input of snRNA data are rds files (seurat objects), from paper: https://www.biorxiv.org/content/10.1101/2021.11.25.469203v1.abstract
+Data acquired from author: Winston R. Becker, via Stanford server internal transfer
+Source data sharable per request.
+
+
+First read in all the fragment files:
+
+```{r}
+scrna_intimu = readRDS("/production/hubmap/snRNA/intestine_immune_cells.rds")
+
+# read in and do seurat clustering for quality check:
+library(Seurat)
+library(harmony)
+temp_obj <- CreateSeuratObject(counts = as.matrix(scrna_intimu@assays$RNA@counts))
+temp_obj@meta.data = as.data.frame(scrna_intimu@meta.data)
+temp_obj <- NormalizeData(temp_obj, normalization.method = "LogNormalize", scale.factor = 10000)
+temp_obj[["percent.mt"]] <- PercentageFeatureSet(temp_obj, pattern = "^MT-")
+temp_obj <- ScaleData(temp_obj, features = rownames(temp_obj))
+temp_obj <- FindVariableFeatures(temp_obj, selection.method = "vst", nfeatures = 2000)
+temp_obj <- RunPCA(temp_obj, features = VariableFeatures(object = temp_obj))
+temp_obj <- RunHarmony(temp_obj, group.by.vars = "Donor")
+temp_obj <- RunUMAP(temp_obj, reduction = "harmony", dims = 1:20)
+DimPlot(temp_obj, group.by = c("Donor", "CellType"), ncol = 2, label = TRUE)
+```
+
+Quick reclustering:
+
+```{r}
+temp_obj = FindNeighbors(temp_obj , reduction = "harmony", dims = 1:20)
+temp_obj = FindClusters(temp_obj, resolution = 1)
+
+# manual annotation:
+seurat_labels = Idents(temp_obj)
+new.cluster.ids <- c("toss","CD8+ T cell","toss","NK","Mono_Macrophages","Mono_Macrophages","Plasma",
+                     "B Cells","Plasma","CD4+ T cell","CD4+ T cell","CD8+ T cell","Mono_Macrophages","Mono_Macrophages",
+                     "toss","toss","toss","Mono_Macrophages","B Cells")
+names(new.cluster.ids) <- levels(temp_obj)
+temp_obj <- RenameIdents(temp_obj, new.cluster.ids)
+```
+
+Save out the wanted cells
+
+```{r}
+#save rna immune
+library(Matrix)
+label = as.character(Idents(temp_obj))
+seurat_labels = as.character(seurat_labels)
+counts = t(temp_obj@assays$RNA@counts[,label %in% c("CD4+ T cell","CD8+ T cell","Plasma","Mono_Macrophages","B Cells") 
+                                      & temp_obj@meta.data$Location %in% c("Duodenum","Ileum","Mid-jejunum","Proximal-jejunum")])
+meta_info = temp_obj@meta.data
+meta_info$CellType2 = label
+meta_info$seurat_clusters = seurat_labels
+meta_info = meta_info[label %in% c("CD4+ T cell","CD8+ T cell","Plasma","Mono_Macrophages","B Cells","NK") 
+                               & temp_obj@meta.data$Location %in% c("Duodenum","Ileum","Mid-jejunum","Proximal-jejunum"),]
+
+counts = as(counts, "dgCMatrix")
+writeMM(counts, "/production/hubmap/match/data/SB_immune_rna1X.txt")
+write.csv(meta_info, "/production/hubmap/match/data/SB_immune_rna_meta1X.csv")
+
+
+### also save the CL ones
+
+#save rna immune
+label = as.character(Idents(temp_obj))
+seurat_labels = as.character(seurat_labels)
+counts = t(temp_obj@assays$RNA@counts[,label %in% c("CD4+ T cell","CD8+ T cell","Plasma","Mono_Macrophages","B Cells") 
+                                      & temp_obj@meta.data$Location %in% c("Ascending","Descending",
+                                                                           "Sigmoid","Transverse")])
+meta_info = temp_obj@meta.data
+meta_info$CellType2 = label
+meta_info$seurat_clusters = seurat_labels
+meta_info = meta_info[label %in% c("CD4+ T cell","CD8+ T cell","Plasma","Mono_Macrophages","B Cells","NK") 
+                               & temp_obj@meta.data$Location %in% c("Ascending","Descending",
+                                                                    "Sigmoid","Transverse"),]
+library(Matrix)
+counts = as(counts, "dgCMatrix")
+writeMM(counts, "/production/hubmap/match/data/CL_immune_rna1X.txt")
+write.csv(meta_info, "/production/hubmap/match/data/CL_immune_rna_meta1X.csv")
+```
+
+
+###################### same process for small bowel epithelial cells
+
+
+```{r}
+scrna_intiepi1 = readRDS("/production/hubmap/snRNA/duodenum_epithelial_cells.rds") #duodenum
+scrna_intiepi2 = readRDS("/production/hubmap/snRNA/jejunum_epithelial_cells.rds") #jejunum
+scrna_intiepi3 = readRDS("/production/hubmap/snRNA/ileum_epithelial_cells.rds") #ileum
+
+count1 = as(scrna_intiepi1@assays$RNA@counts, "dgCMatrix")
+count2 = as(scrna_intiepi2@assays$RNA@counts, "dgCMatrix")
+count3 = as(scrna_intiepi3@assays$RNA@counts, "dgCMatrix")
+
+meta1 = as.data.frame(scrna_intiepi1@meta.data)[,c("orig.ident","Donor","Location","CellType")]
+meta2 = as.data.frame(scrna_intiepi2@meta.data)[,c("orig.ident","Donor","Location","CellType")]
+meta3 = as.data.frame(scrna_intiepi3@meta.data)[,c("orig.ident","Donor","Location","CellType")]
+
+countall = do.call("cbind", list(count1, count2, count3))
+metaall = do.call("rbind", list(meta1, meta2, meta3))
+
+library(Seurat)
+temp_obj <- CreateSeuratObject(counts = countall)
+temp_obj@meta.data = metaall
+temp_obj <- NormalizeData(temp_obj, normalization.method = "LogNormalize", scale.factor = 10000)
+#temp_obj[["percent.mt"]] <- PercentageFeatureSet(temp_obj, pattern = "^MT-")
+temp_obj <- ScaleData(temp_obj, features = rownames(temp_obj))
+temp_obj <- FindVariableFeatures(temp_obj, selection.method = "vst", nfeatures = 2000)
+temp_obj <- RunPCA(temp_obj, features = VariableFeatures(object = temp_obj))
+temp_obj <- RunHarmony(temp_obj, group.by.vars = "Donor")
+temp_obj <- RunUMAP(temp_obj, reduction = "harmony", dims = 1:20)
+```
+
+Clustering
+
+```{r}
+temp_obj = FindNeighbors(temp_obj , reduction = "harmony", dims = 1:20)
+temp_obj = FindClusters(temp_obj, resolution = 1)
+
+seurat_labels = temp_obj@meta.data$RNA_snn_res.1
+# manual annotation
+new.cluster.ids = rep("other",33)
+new.cluster.ids[c(14,9,28)] = "Goblet"
+new.cluster.ids[c(1,2,22)] = "Enterocyte"
+new.cluster.ids[c(20)] = "Enteroendocrine"
+names(new.cluster.ids) <- levels(temp_obj)
+temp_obj <- RenameIdents(temp_obj, new.cluster.ids)
+```
+
+Save out the wanted cells:
+
+```{r}
+label = as.character(Idents(temp_obj))
+seurat_labels = paste("stromal",as.character(seurat_labels), sep = "_")
+seurat_labels = seurat_labels[label %in% c("Goblet","Enteroendocrine")]
+counts = t(temp_obj@assays$RNA@counts[,label %in% c("Goblet","Enteroendocrine") 
+                                      & temp_obj@meta.data$Location %in% c("Duodenum","Ileum","Mid-jejunum","Proximal-jejunum")])
+counts = as(counts, "dgCMatrix")
+meta_info = temp_obj@meta.data
+meta_info$CellType2 = label
+meta_info = meta_info[label %in% c("Goblet","Enteroendocrine") 
+                               & temp_obj@meta.data$Location %in% c("Duodenum","Ileum","Mid-jejunum","Proximal-jejunum"),]
+meta_info$seurat_clusters = seurat_labels
+
+library(Matrix)
+writeMM(counts, "/production/hubmap/match/data/SB_epi_rna1X_v2.txt")
+write.csv(meta_info, "/production/hubmap/match/data/SB_epi_rna_meta1X_v2.csv")
+```
+
+
+###################### same process for stromal cells
+
+
+```{r}
+scrna_intstro = readRDS("/production/hubmap/snRNA/intestine_stromal_cells.rds") #sb
+count1 = as(scrna_intstro@assays$RNA@counts, "dgCMatrix")
+meta1 = as.data.frame(scrna_intstro@meta.data)[,c("orig.ident","Donor","Location","CellType")]
+
+library(Seurat)
+temp_cs_obj <- CreateSeuratObject(counts = count1)
+temp_cs_obj@meta.data = meta1
+temp_cs_obj <- NormalizeData(temp_cs_obj, normalization.method = "LogNormalize", scale.factor = 10000)
+temp_cs_obj <- ScaleData(temp_cs_obj, features = rownames(temp_cs_obj))
+temp_cs_obj <- FindVariableFeatures(temp_cs_obj, selection.method = "vst", nfeatures = 2000)
+temp_cs_obj <- RunPCA(temp_cs_obj, features = VariableFeatures(object = temp_cs_obj))
+temp_cs_obj <- RunHarmony(temp_cs_obj, group.by.vars = "Donor")
+temp_cs_obj <- RunUMAP(temp_cs_obj, reduction = "harmony", dims = 1:20)
+
+# clustering
+temp_cs_obj = FindNeighbors(temp_cs_obj , reduction = "harmony", dims = 1:20)
+temp_cs_obj = FindClusters(temp_cs_obj, resolution = 1)
+
+# manual annotation
+seurat_labels = Idents(temp_cs_obj)
+new.cluster.ids <- c("Smooth muscle","toss","Smooth muscle","Stroma","Smooth muscle","Smooth muscle","Smooth muscle","toss",
+                     "toss","toss","Endothelial","Endothelial","Stroma","Smooth muscle","toss","Smooth muscle","Endothelial",
+                     "Lymphatic","toss","Smooth muscle","Smooth muscle","Smooth muscle","toss","Stroma","Stroma","toss",
+                     "Nerve","Nerve")
+names(new.cluster.ids) <- levels(temp_cs_obj)
+temp_cs_obj <- RenameIdents(temp_cs_obj, new.cluster.ids)
+
+# save out 
+label = as.character(Idents(temp_cs_obj))
+seurat_labels = paste("stromal",as.character(seurat_labels), sep = "_")
+counts = t(temp_cs_obj@assays$RNA@counts[,label %in% c("Smooth muscle","Endothelial","Stroma","Nerve","Lymphatic") 
+                                      & temp_cs_obj@meta.data$Location %in% c("Duodenum","Ileum","Mid-jejunum","Proximal-jejunum")])
+counts = as(counts, "dgCMatrix")
+meta_info = temp_cs_obj@meta.data
+meta_info$CellType2 = label
+meta_info$seurat_clusters = seurat_labels
+meta_info = meta_info[label %in% c("Smooth muscle","Endothelial","Stroma","Nerve","Lymphatic") 
+                               & temp_cs_obj@meta.data$Location %in% c("Duodenum","Ileum","Mid-jejunum","Proximal-jejunum"),]
+
+library(Matrix)
+writeMM(counts, "/production/hubmap/match/data/SB_stroma_rna1X.txt")
+write.csv(meta_info, "/production/hubmap/match/data/SB_stroma_rna_meta1X.csv")
+
+### save the CL version
+
+label = as.character(Idents(temp_cs_obj))
+seurat_labels = paste("stromal",as.character(seurat_labels), sep = "_")
+counts = t(temp_cs_obj@assays$RNA@counts[,label %in% c("Smooth muscle","Endothelial","Stroma","Nerve","Lymphatic") 
+                                      & temp_cs_obj@meta.data$Location %in% c("Ascending","Descending",
+                                                                           "Sigmoid","Transverse")])
+counts = as(counts, "dgCMatrix")
+meta_info = temp_cs_obj@meta.data
+meta_info$CellType2 = label
+meta_info$seurat_clusters = seurat_labels
+meta_info = meta_info[label %in% c("Smooth muscle","Endothelial","Stroma","Nerve","Lymphatic") 
+                               & temp_cs_obj@meta.data$Location %in% c("Ascending","Descending",
+                                                                           "Sigmoid","Transverse"),]
+
+library(Matrix)
+writeMM(counts, "/production/hubmap/match/data/CL_stroma_rna1X.txt")
+write.csv(meta_info, "/production/hubmap/match/data/CL_stroma_rna_meta1X.csv")
+```
+
+
+###################### same process for colon epithelial cells
+
+
+```{r}
+scrna_CLepi1 = readRDS("/production/hubmap/snRNA/colon_epithelial_cells.rds") #duodenum
+count1 = as(scrna_CLepi1@assays$RNA@counts, "dgCMatrix")
+meta1 = as.data.frame(scrna_CLepi1@meta.data)[,c("orig.ident","Donor","Location","CellType")]
+
+library(Seurat)
+library(harmony)
+
+temp_obj <- CreateSeuratObject(counts = count1)
+temp_obj@meta.data = meta1
+temp_obj <- NormalizeData(temp_obj, normalization.method = "LogNormalize", scale.factor = 10000)
+temp_obj <- ScaleData(temp_obj, features = rownames(temp_obj))
+temp_obj <- FindVariableFeatures(temp_obj, selection.method = "vst", nfeatures = 2000)
+temp_obj <- RunPCA(temp_obj, features = VariableFeatures(object = temp_obj))
+temp_obj <- RunHarmony(temp_obj, group.by.vars = "Donor")
+temp_obj <- RunUMAP(temp_obj, reduction = "harmony", dims = 1:20)
+
+temp_obj = FindNeighbors(temp_obj , reduction = "harmony", dims = 1:20)
+temp_obj = FindClusters(temp_obj, resolution = 1)
+
+seurat_labels = temp_obj@meta.data$RNA_snn_res.1
+new.cluster.ids = rep("other",24)
+new.cluster.ids[c(11,4,13)] = "Goblet"
+new.cluster.ids[c(22)] = "Enteroendocrine"
+
+
+label = as.character(Idents(temp_obj))
+seurat_labels = paste("stromal",as.character(seurat_labels), sep = "_")
+seurat_labels = seurat_labels[label %in% c("Goblet","Enteroendocrine")]
+counts = t(temp_obj@assays$RNA@counts[,label %in% c("Goblet","Enteroendocrine") 
+                                      & temp_obj@meta.data$Location %in% c("Ascending","Descending",
+                                                                           "Sigmoid","Transverse")])
+counts = as(counts, "dgCMatrix")
+meta_info = temp_obj@meta.data
+meta_info$CellType2 = label
+meta_info = meta_info[label %in% c("Goblet","Enteroendocrine") 
+                               & temp_obj@meta.data$Location %in% c("Ascending","Descending",
+                                                                           "Sigmoid","Transverse"),]
+meta_info$seurat_clusters = seurat_labels
+library(Matrix)
+writeMM(counts, "/production/hubmap/match/data/CL_epi_rna1X.txt")
+write.csv(meta_info, "/production/hubmap/match/data/CL_epi_rna_meta1X.csv")
+```
+
+
+

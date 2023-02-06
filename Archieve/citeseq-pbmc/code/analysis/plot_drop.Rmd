@@ -1,0 +1,98 @@
+---
+title: "plot_drop"
+output: html_document
+---
+
+Script to produce citeseq pbmc plots (drop panel version)
+These values were calculated before, check the ipynb in this folder for detail
+
+```{r}
+library(ggplot2)
+library(reshape2)
+
+# read metrics calculated prev
+mdrop = read.csv("/bench_test3/output/drop4_batch5_resultsV2.csv", row.names = 1)
+mdrop$method <- factor(mdrop$method,levels = c("mf", "sr", "lg", "hm","bsc"))
+mdrop$drop <- factor(mdrop$drop,levels = c("dropLv0", "dropLv1", "dropLv2", "dropLv3"))
+colorv = c("#f6511d","#ffb400","#00a6ed","#7fb800","#A149FA")
+```
+
+
+```{r}
+temp = melt(mdrop, id = c("method","batch","drop"))
+temp2 = subset(temp, temp$variable == "ann1")
+
+temp2$method <- factor(temp2$method,levels = c("mf", "sr", "lg", "hm", "bsc"))
+colorv = c("#f6511d","#ffb400","#00a6ed","#7fb800","#A149FA")
+
+# plot matching accu annotation lv1 when dropps
+p = ggplot(temp2,aes(x=drop,y=value, colour=method,fill = method, group = method)) +
+  stat_summary(geom = "line", fun.y = mean, size = 0.2) +
+  stat_summary(geom = "ribbon", fun.data = mean_cl_normal, fun.args=list(conf.int=0.85), alpha = 0.2, colour = NA) +
+  theme_minimal()+ ggtitle("ann1") + scale_fill_manual(values = colorv) + scale_color_manual(values = colorv)+
+  scale_x_discrete(expand=c(0.05, 0.05)) + ylim(c(0.3,1))
+ggsave("/bench_test3/plots/drop-p1V2.svg", height = 3, width = 5)
+p
+```
+
+```{r}
+temp = melt(mdrop, id = c("method","batch","drop"))
+temp2 = subset(temp, temp$variable == "ann2")
+
+temp2$method <- factor(temp2$method,levels = c("mf", "sr", "lg", "hm", "bsc"))
+colorv = c("#f6511d","#ffb400","#00a6ed","#7fb800","#A149FA")
+
+# plot matching accu annotation lv2 when dropps
+p = ggplot(temp2,aes(x=drop,y=value, colour=method,fill = method, group = method)) +
+  stat_summary(geom = "line", fun.y = mean, size = 0.2) +
+  stat_summary(geom = "ribbon", fun.data = mean_cl_normal, fun.args=list(conf.int=0.85), alpha = 0.2, colour = NA) +
+  theme_minimal()+ ggtitle("ann2") + scale_fill_manual(values = colorv) + scale_color_manual(values = colorv) +
+  scale_x_discrete(expand=c(0.05, 0.05)) + ylim(c(0.1,0.85))
+
+ggsave("/bench_test3/plots/drop-p2V2.svg", height = 3, width = 5)
+p
+```
+
+
+```{r}
+temp = melt(mdrop, id = c("method","batch","drop"))
+temp2 = subset(temp, temp$variable == "foscttm")
+
+temp2$method <- factor(temp2$method,levels = c("mf", "sr", "lg", "hm", "bsc"))
+colorv = c("#f6511d","#ffb400","#00a6ed","#7fb800","#A149FA")
+
+# plot foscttm when dropps
+p = ggplot(temp2,aes(x=drop,y=value, colour=method,fill = method, group = method)) +
+  stat_summary(geom = "line", fun.y = mean, size = 0.2) +
+  stat_summary(geom = "ribbon", fun.data = mean_cl_normal, fun.args=list(conf.int=0.85), alpha = 0.2, colour = NA) +
+  theme_minimal()+ ggtitle("foscttm") + scale_fill_manual(values = colorv) + scale_color_manual(values = colorv)+
+  scale_x_discrete(expand=c(0.05, 0.05))+ ylim(c(0,0.35))
+
+ggsave("/bench_test3/plots/drop-p3V2.svg", height = 3, width = 5)
+p
+```
+
+
+```{r}
+knn_drop = read.csv("/bench_test3/output/drop4_batch5_knntmpV2.csv")
+knn_drop_50 = subset(knn_drop, knn_drop$step == 99)
+knn_drop_50$method <- factor(knn_drop_50$method,levels = c("mf", "sr", "lg", "hm","bsc"))
+knn_drop_50$X <- NULL
+knn_drop_50$step <- NULL
+knn_drop_50$batch <- NULL
+temp3 = melt(knn_drop_50, id = c("method","drop"))
+
+colorv = c("#f6511d","#ffb400","#00a6ed","#7fb800","#A149FA")
+
+# plot foscKNN when dropps (k set to 100)
+p = ggplot(temp3,aes(x=drop,y=value, colour=method,fill = method, group = method)) +
+  stat_summary(geom = "line", fun.y = mean, size = 0.2) +
+  stat_summary(geom = "ribbon", fun.data = mean_cl_normal, fun.args=list(conf.int=0.85), alpha = 0.3, colour = NA) +
+  theme_minimal()+ ggtitle("foscknn") + scale_fill_manual(values = colorv) + scale_color_manual(values = colorv)+
+  scale_x_discrete(expand=c(0.05, 0.05))+ ylim(c(0,0.25))
+
+ggsave("/bench_test3/plots/drop-p4V2.svg", height = 3, width = 5)
+p
+```
+
+

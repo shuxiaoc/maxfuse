@@ -1,0 +1,143 @@
+---
+title: "tonsilrna_prep"
+output: html_document
+---
+
+Script for preping tonsil rna data, from greenleaf lab
+data source from https://www.biorxiv.org/content/10.1101/2021.03.16.435578v1.full.pdf+html (now published in science immunology)
+data deposition site GSE165860, tonsil 1a, 1b, 2a, 2b, 3a, 3b, scRNA-seq
+
+```{r}
+library(Seurat)
+# all the tonsils to load up this takes some time
+t1a = Read10X(data.dir = "/home/bkzhu/super_mario/test_phase/human_tonsil/RNA/1a")
+t1a_obj <- CreateSeuratObject(counts = t1a$`Gene Expression`,min.features = 100)
+
+t1b = Read10X(data.dir = "/home/bkzhu/super_mario/test_phase/human_tonsil/RNA/1b")
+t1b_obj <- CreateSeuratObject(counts = t1b$`Gene Expression`,min.features = 100)
+
+t2a = Read10X(data.dir = "/home/bkzhu/super_mario/test_phase/human_tonsil/RNA/2a")
+t2a_obj <- CreateSeuratObject(counts = t2a$`Gene Expression`,min.features = 100)
+
+t2b = Read10X(data.dir = "/home/bkzhu/super_mario/test_phase/human_tonsil/RNA/2b")
+t2b_obj <- CreateSeuratObject(counts = t2b$`Gene Expression`,min.features = 100)
+
+t3a = Read10X(data.dir = "/home/bkzhu/super_mario/test_phase/human_tonsil/RNA/3a")
+t3a_obj <- CreateSeuratObject(counts = t3a$`Gene Expression`,min.features = 100)
+
+t3b = Read10X(data.dir = "/home/bkzhu/super_mario/test_phase/human_tonsil/RNA/3b")
+t3b_obj <- CreateSeuratObject(counts = t3b$`Gene Expression`,min.features = 100)
+```
+
+```{r}
+# following preprocessing code described in the science immunology paper
+t1 = merge(t1a_obj, y = t1b_obj, 
+                    add.cell.ids = c("1a", "1b"), project = "tonsilrna")
+t2 <- merge(t2a_obj, y = t2b_obj, 
+                    add.cell.ids = c("2a","2b"), project = "tonsilrna")
+t3 <- merge(t3a_obj, y = t3b_obj, 
+                    add.cell.ids = c("3a","3b"), project = "tonsilrna")
+# this step takes ~20mins
+t1 <- SCTransform(t1)
+t2 <- SCTransform(t2)
+t3 <- SCTransform(t3)
+
+t1[["percent.mt"]] <- PercentageFeatureSet(t1, pattern = "^MT-")
+t2[["percent.mt"]] <- PercentageFeatureSet(t2, pattern = "^MT-")
+t3[["percent.mt"]] <- PercentageFeatureSet(t3, pattern = "^MT-")
+
+t1 <- subset(t1, subset = nFeature_RNA > 200 & nFeature_RNA < 7500 & percent.mt < 20)
+t2 <- subset(t2, subset = nFeature_RNA > 200 & nFeature_RNA < 7500 & percent.mt < 20)
+t3 <- subset(t3, subset = nFeature_RNA > 200 & nFeature_RNA < 7500 & percent.mt < 20)
+```
+
+```{r}
+tonsil.all <- merge(t1, y = c(t2, t3), 
+                    add.cell.ids = c("t1", "t2","t3"), project = "tonsilrna")
+tonsil.all <- SCTransform(tonsil.all)
+
+tonsil.all <- FindVariableFeatures(tonsil.all) %>% ScaleData() %>% RunPCA(verbose = FALSE)
+tonsil.all@meta.data$batch = c(rep("t1", dim(t1)[2]), rep("t2", dim(t2)[2]), rep("t3", dim(t3)[2]))
+library(harmony)
+tonsil.all <- RunHarmony(tonsil.all, group.by.vars = "batch",assay.use = "SCT")
+tonsil.all <- RunUMAP(tonsil.all, reduction = "harmony", dims = 1:27)
+tonsil.all <- FindNeighbors(tonsil.all, reduction = "harmony", dims = 1:27) %>% FindClusters(resolution = 0.5)
+
+# try doublet remove
+remotes::install_github('chris-mcginnis-ucsf/DoubletFinder')
+suppressMessages(require(DoubletFinder))
+library(DoubletFinder)
+nExp1 <- round(ncol(tonsil.all) * 0.04)
+tonsil.all <- doubletFinder_v3(tonsil.all, sct = FALSE,pN = 0.25, pK = 0.09,nExp = nExp1,  PCs = 1:27)
+```
+
+
+```{r}
+# quick check of markers and do manual annotation
+tonsil.all.sub = subset(tonsil.all, downsample = 5000)
+tonsil.all.markers <- FindAllMarkers(tonsil.all.sub, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+tonsil.all.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 10, wt = avg_logFC) -> top10
+
+new.cluster.ids <- c("circB","circB","circB","CD4 T",
+                     "B-CD22-CD40","B-Ki67","circB","circB","Plasma","other",
+                     "CD8 T","other","other","other","other","other","other")
+seurat_labels = paste("Imn",Idents(tonsil.all),sep = "_")
+names(new.cluster.ids) <- levels(tonsil.all)
+tonsil.all <- RenameIdents(tonsil.all, new.cluster.ids)
+table(Idents(tonsil.all))
+```
+
+
+```{r}
+# save this out 
+seurat_labels = seurat_labels
+label = as.character(Idents(tonsil.all))
+counts = t(tonsil.all@assays$RNA@counts)
+`%notin%` <- Negate(`%in%`)
+counts = counts[label %notin% c("other","circB"),] # dont need to save out un annotated cells and circulating b cells
+# since these cells dont need to be match and integrated
+
+library(Matrix)
+writeMM(counts, "/tonsil/tonsil_rna.txt")
+rna_meta = data.frame(cell.id = tonsil.all@meta.data$orig.ident[label %notin% c("other","circB")],
+                      cluster.info = label[label %notin% c("other","circB")],
+                      seurat_labels = seurat_labels[label %notin% c("other","circB")])
+write.csv(rna_meta, "/tonsil/tonsil_meta.csv")
+rnainfo = data.frame(names = colnames(counts))
+write.csv(rnainfo, "/tonsil/tonsil_rnaNames.csv")
+
+```
+
+
+update 0510-2022, in the last round of annotation forgot to annotate DC cells
+
+
+```{r}
+tonsil.all <- FindNeighbors(tonsil.all, reduction = "harmony", dims = 1:27) %>% FindClusters(resolution = 0.5)
+DimPlot(tonsil.all, group.by = "ident", label = TRUE)
+```
+
+```{r}
+ll = as.character(tonsil.all@meta.data$label)
+ll[Idents(tonsil.all) == 16] = 'DC'
+tonsil.all@meta.data$label = ll
+
+# save this out 
+seurat_labels = Idents(tonsil.all)
+label = ll
+counts = t(tonsil.all@assays$RNA@counts)
+`%notin%` <- Negate(`%in%`)
+counts = counts[label %notin% c("other","circB"),]
+
+library(Matrix)
+writeMM(counts, "/tonsil_v2/RNA/tonsil_rna_0510.txt")
+rna_meta = data.frame(cell.id = tonsil.all@meta.data$orig.ident[label %notin% c("other","circB")],
+                      cluster.info = label[label %notin% c("other","circB")],
+                      seurat_labels = seurat_labels[label %notin% c("other","circB")])
+write.csv(rna_meta, "/tonsil_v2/RNA/tonsil_rna_0510_meta.csv")
+rnainfo = data.frame(names = colnames(counts))
+write.csv(rnainfo, "/tonsil_v2/RNA/tonsil_rna_0510_names.csv")
+```
+

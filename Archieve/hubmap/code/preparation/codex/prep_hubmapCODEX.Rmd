@@ -1,0 +1,239 @@
+---
+title: "pre_hubmapCODEX"
+output: html_document
+---
+
+Input of CODEX data are csv files (row as cell column as single cell protein expression + other meta information produced by John Hickey), from paper: https://www.biorxiv.org/content/10.1101/2021.11.25.469203v1.abstract
+Data acquired from author: John Hickey, via Stanford server internal transfer
+Source data sharable per request.
+
+read in codex data:
+
+```{r}
+library(data.table)
+codex_hub = fread("/hubmap_phase2/codex/CODEX_HuBMAP_alldata_22.csv")
+codex_hub$uniqueID = rownames(codex_hub)
+
+# all protein markers
+c2u = c("MUC2","SOX9","MUC1","CD31","Synapto","CD49f","CD15","CHGA","CDX2","ITLN1","CD4","CD127","Vimentin","HLADR",
+        "CD8","CD11c","CD44","CD16","BCL2","CD3","CD123","CD38","CD90","aSMA","CD21","NKG2D","CD66","CD57","CD206",
+        "CD68","CD34","aDef5","CD7","CD36","CD138","CD45RO","Cytokeratin","CD117","CD19","Podoplanin","CD45","CD56",
+        "CD69","Ki67","CD49a","CD163","CD161","CK7")
+```
+
+Similar what was done in the snRNAseq data prep, we do a rough clustering to check the annotation quality:
+
+For small bowel -- immune cells:
+
+```{r}
+codex_hub_sb = subset(codex_hub, codex_hub$Tissue_location %in% c("Duodenum", "Ileum", "Mid-jejunum", "Proximal Jejunum"))
+# 1,588,762
+
+codex_hubsb_immune = subset(codex_hub_sb, codex_hub_sb$`Cell subtype` == "Immune")
+codex_hubsb_immune = as.data.frame(codex_hubsb_immune)
+rownames(codex_hubsb_immune) = paste0('imm' , as.character(codex_hubsb_immune$uniqueID)) # just for seurat
+# 469,926
+
+library(Seurat)
+temp_obj1 <- CreateSeuratObject(counts = t(codex_hubsb_immune[,c2u]))
+temp_obj1@meta.data$celltype = as.character(codex_hubsb_immune$`Cell Type`)
+SetAssayData(object = temp_obj1, slot = "data", new.data = t(codex_hubsb_immune[,c2u]))
+temp_obj1 <- SetAssayData(object = temp_obj1, slot = "scale.data", new.data = t(codex_hubsb_immune[,c2u]))
+temp_obj1 <- RunPCA(temp_obj1, features = c2u)
+temp_obj1 <- RunUMAP(temp_obj1, dims = 1:20)
+
+# clustering
+temp_obj1 = FindNeighbors(temp_obj1 , dims = 1:15)
+temp_obj1 = FindClusters(temp_obj1, resolution = 1)
+seurat_clusters = Idents(temp_obj1)
+codex_hubsb_immune$seurat_clusters = paste("imm",seurat_clusters, sep = "_")
+
+# rename clusters to be consistant with snRNA-seq
+label = as.character(codex_hubsb_immune$`Cell Type`)
+label[label == "CD8+ T"] = "CD8+"
+label[label == "CD4+ T"] = "CD4+"
+label[label == "B"] = "B Cells"
+label[label == "M1 Macrophage"] = "Mono_Macrophages"
+label[label == "M2 Macrophage"] = "Mono_Macrophages"
+codex_hubsb_immune$cluster.term = label
+
+# save out data
+codex_hubsb_immune = subset(codex_hubsb_immune, codex_hubsb_immune$cluster.term != "CD7+ Immune") # remove cells that dont need to be matched
+write.csv(codex_hubsb_immune, "/hubmap_phase2/codex_cleaned/SB_immune.csv")
+```
+
+For small bowel -- stromal cells:
+
+```{r}
+codex_hub_sb_stromal = subset(codex_hub_sb, codex_hub_sb$`Cell subtype` == 'Stromal')
+
+codex_hub_sb_stromal = as.data.frame(codex_hub_sb_stromal)
+rownames(codex_hub_sb_stromal) = paste0('strm' , as.character(codex_hub_sb_stromal$uniqueID)) # just for seurat
+# 449,833
+
+library(Seurat)
+temp_obj2 <- CreateSeuratObject(counts = t(codex_hub_sb_stromal[,c2u]))
+temp_obj2@meta.data$celltype = as.character(codex_hub_sb_stromal$`Cell Type`)
+SetAssayData(object = temp_obj2, slot = "data", new.data = t(codex_hub_sb_stromal[,c2u]))
+temp_obj2 <- SetAssayData(object = temp_obj2, slot = "scale.data", new.data = t(codex_hub_sb_stromal[,c2u]))
+temp_obj2 <- RunPCA(temp_obj2, features = c2u)
+temp_obj2 <- RunUMAP(temp_obj2, dims = 1:20)
+
+# clustering
+temp_obj2 = FindNeighbors(temp_obj2 , dims = 1:15)
+temp_obj2 = FindClusters(temp_obj2, resolution = 1)
+
+# no need to annotate, the original info is good enough
+seurat_clusters = Idents(temp_obj2)
+codex_hub_sb_stromal$seurat_clusters = paste("strm",seurat_clusters, sep = "_")
+codex_hub_sb_stromal = subset(codex_hub_sb_stromal, codex_hub_sb_stromal$`Cell Type` != "ICC") # icc not in sequencing
+
+# save out data
+write.csv(codex_hub_sb_stromal, "/hubmap_phase2/codex_cleaned/SB_stromal.csv")
+```
+
+For small bowel -- stromal cells:
+
+```{r}
+codex_hub_sb_epi = subset(codex_hub_sb, codex_hub_sb$`Cell subtype` == 'Epithelial')
+
+codex_hub_sb_epi = as.data.frame(codex_hub_sb_epi)
+rownames(codex_hub_sb_epi) = paste0('epi' , as.character(codex_hub_sb_epi$uniqueID)) # just for seurat
+# 332,866 
+
+library(Seurat)
+temp_obj3 <- CreateSeuratObject(counts = t(codex_hub_sb_epi[,c2u]))
+temp_obj3@meta.data$celltype = as.character(codex_hub_sb_epi$`Cell Type`)
+SetAssayData(object = temp_obj3, slot = "data", new.data = t(codex_hub_sb_epi[,c2u]))
+temp_obj3 <- SetAssayData(object = temp_obj3, slot = "scale.data", new.data = t(codex_hub_sb_epi[,c2u]))
+temp_obj3 <- RunPCA(temp_obj3, features = c2u)
+temp_obj3 <- RunUMAP(temp_obj3, dims = 1:20)
+
+# clustering
+temp_obj3 = FindNeighbors(temp_obj3 , dims = 1:15)
+temp_obj3 = FindClusters(temp_obj3, resolution = 1)
+
+seurat_clusters = Idents(temp_obj3)
+codex_hub_sb_epi$seurat_clusters = paste("epi",seurat_clusters, sep = "_")
+
+# rename clusters and save out
+label = as.character(codex_hub_sb_epi$`Cell Type`)
+label[label == "Neuroendocrine"] = "Enteroendocrine" # change naming scheme to be consistant with other modalities
+codex_hub_sb_epi$cluster.term = label
+codex_hub_sb_epi_sub = subset(codex_hub_sb_epi,codex_hub_sb_epi$cluster.term %in% c("Enteroendocrine","Goblet"))
+write.csv(codex_hub_sb_epi_sub, "/production/hubmap/match/data/SB_epi_codex.csv")
+```
+
+
+
+
+####################### now CL part of the data
+
+
+For colon -- immune cells:
+
+```{r}
+codex_hub_CL = subset(codex_hub, codex_hub$Tissue_location %in% c("Ascending", "Transverse", "Descending", "Descending - Sigmoid"))
+# 1014343
+
+codex_hubCL_immune = subset(codex_hub_CL, codex_hub_CL$`Cell subtype` == "Immune")
+rownames(codex_hubCL_immune) = paste0('imm' , as.character(codex_hubCL_immune$uniqueID)) # just for seurat
+codex_hubCL_immune = as.data.frame(codex_hubCL_immune)
+# 231,644
+
+library(Seurat)
+temp_obj1 <- CreateSeuratObject(counts = t(codex_hubCL_immune[,c2u]))
+temp_obj1@meta.data$celltype = as.character(codex_hubCL_immune$`Cell Type`)
+SetAssayData(object = temp_obj1, slot = "data", new.data = t(codex_hubCL_immune[,c2u]))
+temp_obj1 <- SetAssayData(object = temp_obj1, slot = "scale.data", new.data = t(codex_hubCL_immune[,c2u]))
+temp_obj1 <- RunPCA(temp_obj1, features = c2u)
+temp_obj1 <- RunUMAP(temp_obj1, dims = 1:20)
+
+# clustering
+temp_obj1 = FindNeighbors(temp_obj1 , dims = 1:15)
+temp_obj1 = FindClusters(temp_obj1, resolution = 1)
+seurat_clusters = Idents(temp_obj1)
+codex_hubCL_immune$seurat_clusters = paste("imm",seurat_clusters, sep = "_")
+
+# rename clusters to be consistant with other modalities
+label = as.character(codex_hubCL_immune$`Cell Type`)
+label[label == "CD8+ T"] = "CD8+"
+label[label == "CD4+ T"] = "CD4+"
+label[label == "B"] = "B Cells"
+label[label == "M1 Macrophage"] = "Mono_Macrophages"
+label[label == "M2 Macrophage"] = "Mono_Macrophages"
+codex_hubCL_immune$cluster.term = label
+
+# save out
+codex_hubCL_immune = subset(codex_hubCL_immune, codex_hubCL_immune$cluster.term != "CD7+ Immune") # remove cells that dont need to be matched
+write.csv(codex_hubCL_immune, "/hubmap_phase2/codex_cleaned/CL_immune.csv")
+```
+
+For colon -- stromal cells:
+
+```{r}
+codex_hub_CL_stromal = subset(codex_hub_CL, codex_hub_CL$`Cell subtype` == 'Stromal')
+
+codex_hub_CL_stromal = as.data.frame(codex_hub_CL_stromal)
+rownames(codex_hub_CL_stromal) = paste0('strm' , as.character(codex_hub_CL_stromal$uniqueID)) # just for seurat
+# 449,833
+
+library(Seurat)
+temp_obj2 <- CreateSeuratObject(counts = t(codex_hub_CL_stromal[,c2u]))
+temp_obj2@meta.data$celltype = as.character(codex_hub_CL_stromal$`Cell Type`)
+SetAssayData(object = temp_obj2, slot = "data", new.data = t(codex_hub_CL_stromal[,c2u]))
+temp_obj2 <- SetAssayData(object = temp_obj2, slot = "scale.data", new.data = t(codex_hub_CL_stromal[,c2u]))
+temp_obj2 <- RunPCA(temp_obj2, features = c2u)
+temp_obj2 <- RunUMAP(temp_obj2, dims = 1:20)
+
+# clustering
+temp_obj2 = FindNeighbors(temp_obj2 , dims = 1:15)
+temp_obj2 = FindClusters(temp_obj2, resolution = 1)
+seurat_clusters = Idents(temp_obj2)
+codex_hub_CL_stromal$seurat_clusters = paste("strm",seurat_clusters, sep = "_")
+
+# rename clusters
+codex_hub_CL_stromal = subset(codex_hub_CL_stromal, codex_hub_CL_stromal$`Cell Type` != "ICC") # icc not in sequencing
+codex_hub_CL_stromal$cluster.term = codex_hub_CL_stromal$`Cell Type`
+
+# save out
+write.csv(codex_hub_CL_stromal, "/hubmap_phase2/codex_cleaned/CL_stromal.csv")
+```
+
+For colon -- stromal cells:
+
+```{r}
+codex_hub_CL_epi = subset(codex_hub_CL, codex_hub_CL$`Cell subtype` == 'Epithelial')
+
+codex_hub_CL_epi = as.data.frame(codex_hub_CL_epi)
+rownames(codex_hub_CL_epi) = paste0('epi' , as.character(codex_hub_CL_epi$uniqueID)) # just for seurat
+# 332,866 
+
+library(Seurat)
+temp_obj3 <- CreateSeuratObject(counts = t(codex_hub_CL_epi[,c2u]))
+temp_obj3@meta.data$celltype = as.character(codex_hub_CL_epi$`Cell Type`)
+SetAssayData(object = temp_obj3, slot = "data", new.data = t(codex_hub_CL_epi[,c2u]))
+temp_obj3 <- SetAssayData(object = temp_obj3, slot = "scale.data", new.data = t(codex_hub_CL_epi[,c2u]))
+temp_obj3 <- RunPCA(temp_obj3, features = c2u)
+temp_obj3 <- RunUMAP(temp_obj3, dims = 1:20)
+
+# clustering
+temp_obj3 = FindNeighbors(temp_obj3 , dims = 1:15)
+temp_obj3 = FindClusters(temp_obj3, resolution = 1)
+seurat_clusters = Idents(temp_obj3)
+codex_hub_CL_epi$seurat_clusters = paste("epi",seurat_clusters, sep = "_")
+
+# rename clusters
+label = as.character(codex_hub_CL_epi$`Cell Type`)
+label[label == "Neuroendocrine"] = "Enteroendocrine"
+codex_hub_CL_epi$cluster.term = label
+
+# save out
+codex_hub_CL_epi_sub = subset(codex_hub_CL_epi,codex_hub_CL_epi$cluster.term %in% c("Enteroendocrine","Goblet"))
+write.csv(codex_hub_CL_epi_sub, "/production/hubmap/match/data/CL_epi_codex.csv")
+```
+
+
+Note not all the codex cells (~2 million) were used for this manuscript. For showcasing reason cells only from two individual patients were used in downstream analysis. See the python code in this folder.
+
+

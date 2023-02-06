@@ -1,0 +1,801 @@
+---
+title: "plot_cl"
+output: html_document
+---
+
+code to plot cl related maxfuse results
+
+```{r}
+#### first read in the original codex rna atac expressions
+
+# prep the meta and count files
+`%notin%` <- Negate(`%in%`)
+###### start with codex
+cdx_cl_mc = read.csv("/hubmap_fin/data/b006_cl_cdx.csv") # 79k here
+cdx_cl_mc_sub = subset(cdx_cl_mc, cdx_cl_mc$cluster.term %notin% c('NK', 'Lymphatic', 'DC', 'Neutrophil', 'Nerve')) # 69273
+cdx_cl_mc_sub$cluster.term = gsub('CD4\\+ T cell','T',cdx_cl_mc_sub$cluster.term)
+cdx_cl_mc_sub$cluster.term = gsub('CD8\\+','T',cdx_cl_mc_sub$cluster.term)
+
+###### rna counts
+prefix = '/production/hubmap/match/data/'
+rna_names = read.csv(paste0(prefix,'SB_immune_rna_names.csv'))
+
+rna = readMM(paste0(prefix,"CL_immune_rna1X.txt"))
+rna = as.data.frame(as.matrix(rna))
+colnames(rna) = rna_names$names
+
+rna_stro  = readMM(paste0(prefix,"CL_stroma_rna1X.txt"))
+rna_stro = as.data.frame(as.matrix(rna_stro))
+colnames(rna_stro) = rna_names$names
+
+rna_epi  = readMM(paste0(prefix,"CL_epi_rna1X.txt"))
+rna_epi = as.data.frame(as.matrix(rna_epi))
+colnames(rna_epi) = rna_names$names
+
+rna_all = do.call(rbind, list(rna, rna_stro, rna_epi))
+
+## read rna meta data
+rna_meta = read.csv(paste0(prefix,"CL_immune_rna_meta1X.csv"))
+rna_stro_meta  = read.csv(paste0(prefix,"CL_stroma_rna_meta1X.csv"))
+rna_epi_meta  = read.csv(paste0(prefix,"CL_epi_rna_meta1X.csv"))
+rna_meta = rna_meta[,colnames(rna_epi_meta)]
+rna_all_meta = do.call(rbind, list(rna_meta, rna_stro_meta, rna_epi_meta))
+
+## remove
+rna_all_used = subset(rna_all, rna_all_meta$CellType2 %notin% c('NK', 'Lymphatic', 'Nerve'))
+rna_all_meta_used = subset(rna_all_meta, rna_all_meta$CellType2 %notin% c('NK', 'Lymphatic', 'Nerve'))
+rna_all_meta_used$CellType2 = gsub('CD4\\+ T cell','T',rna_all_meta_used$CellType2)
+rna_all_meta_used$CellType2 = gsub('CD8\\+ T cell','T',rna_all_meta_used$CellType2)
+
+
+######## gene activity score used
+prefix = '/hubmap_fin/data/'
+gas_names = read.csv(paste0(prefix,'hub_sub_genescore_names.csv'))
+
+gas = readMM(paste0(prefix,"hub_sub_genescore.txt"))
+gas = as.data.frame(as.matrix(gas))
+colnames(gas) = gas_names$names
+
+gas_meta = read.csv(paste0(prefix,"hub_sub_genescore_meta.csv"))
+
+## remove
+gas_used = subset(gas, gas_meta$tissue == 'cl')
+gas_meta_used = subset(gas_meta, gas_meta$tissue == 'cl')
+gas_meta_used$cluster.info = gsub('CD4\\+ T cell','T',gas_meta_used$cluster.info)
+gas_meta_used$cluster.info = gsub('CD8\\+ T cell','T',gas_meta_used$cluster.info)
+
+
+######## transcription factor calculated from atac information
+prefix = '/hubmap_fin/data/'
+tf_names = read.csv(paste0(prefix,'hub_sub_tf_names.csv'))
+
+tf = readMM(paste0(prefix,"hub_sub_tfzscore.txt"))
+tf = as.data.frame(as.matrix(tf))
+colnames(tf) = tf_names$names[871:1740]
+
+tf_used = subset(tf, gas_meta$tissue == 'cl')
+
+
+###############################
+
+
+# load embedding
+all_preumap = read.csv("/hubmap_fin/output/tri_int/cl_cdx_gcca_hh_preUmap.csv")
+# this is cca scores by maxfuse, codex rna atac rowbind stacked, sepearate thenm
+rna_row = 13210#nrow(rna_embd)
+atac_row = 14592#nrow(atac_embd)
+cdx_row = 102696#nrow(codex_embd)
+
+codex_embd = all_preumap[-c(1:(rna_row + atac_row)),]
+rna_embd = all_preumap[c(1:rna_row),]
+atac_embd = all_preumap[c((rna_row+1):(rna_row+ atac_row)),]
+
+# retrieve the matching index information
+codex_mtch_indx = read.csv('/hubmap_fin/output/tri_int/cl_cdx_full_indx_hh.csv')
+
+# here for codex cells, we only select cells that has a match in the other two modalities
+tri_embd = do.call(rbind, list(codex_embd[codex_mtch_indx$codex_indice+1,], rna_embd, atac_embd)) 
+cdx_num = dim(codex_embd[codex_mtch_indx$codex_indice+1,])[1]
+rna_num = dim(rna_embd)[1]
+atac_num = dim(atac_embd)[1]
+label_tri = c(rep('codex', cdx_num), rep('rna', rna_num), rep('atac', atac_num))
+
+
+# then we do umap plotting in with seurat
+library(Seurat)
+
+temp_obj2 <- CreateSeuratObject(counts = t(tri_embd)) # dummy
+temp_obj2 <- SetAssayData(object = temp_obj2, slot = "data", new.data = t(tri_embd)) # dummy
+temp_obj2 <- SetAssayData(object = temp_obj2, slot = "scale.data", new.data = t(tri_embd)) # dummy
+temp_obj2[["cca"]] <- CreateDimReducObject(embeddings = as.matrix(tri_embd),
+                                           key = "cca_", assay = DefaultAssay(temp_obj2))
+temp_obj2 <- RunUMAP(temp_obj2, reduction = 'cca',dims = 1:15)
+temp_obj2@meta.data$mod = label_tri
+DimPlot(temp_obj2, label = T, group.by = 'mod')
+```
+
+```{r}
+cdx_label = cdx_cl_mc_sub$cluster.term[codex_mtch_indx$codex_indice+1]
+label_tri_cell = c(as.character(cdx_label),as.character(rna_all_meta_used$CellType2),
+                   as.character(gas_meta_used$cluster.info))
+
+temp_obj2@meta.data$cell = label_tri_cell
+DimPlot(temp_obj2, label = T, group.by = 'cell')
+```
+
+```{r}
+# produce the actual figure
+umapdf = as.data.frame(temp_obj2@reductions$umap@cell.embeddings)
+
+library(ggplot2)
+library(ggsci)
+
+p = ggplot(umapdf, aes(UMAP_1, UMAP_2, color = label_tri)) +
+  geom_point(size = 0.25, stroke = 0.25, alpha = 0.3) + scale_color_manual(values = c("#a0fefb","#494fc1","#fd084a")) +
+  theme_classic()
+ggsave("/hubmap_fin/plot/CL_full21_mod_hh.png",p,height = 7, width = 9)
+p
+```
+
+```{r}
+p = ggplot(umapdf, aes(UMAP_1, UMAP_2, color = label_tri_cell)) +
+  geom_point(size = 0.25, stroke = 0.25, alpha = 0.3) + scale_color_futurama() + theme_classic() + 
+  guides(colour = guide_legend(override.aes = list(size=10, alpha = 1)))
+ggsave("/hubmap_fin/plot/CL_full21_cell_hh.png",p,height = 7, width = 9)
+p
+```
+
+
+###### next we want to produce the feature expression levels overlapping with umaps
+
+
+```{r}
+# first since the raw input are counts, we do the normalization
+temp_norm = CreateSeuratObject(counts=t(rna_all_used),assay="temp")
+temp_norm = NormalizeData(temp_norm)
+
+temp_norm2 = CreateSeuratObject(counts=t(gas_used),assay="temp")
+temp_norm2 = NormalizeData(temp_norm2)
+# proteion dont need to do this is because raw input is already processed levels
+
+#### protein matched
+protein_matched = cdx_cl_mc_sub[codex_mtch_indx$codex_indice+1,c(3:49)] # select protein columns
+rownames(protein_matched) = paste0("pro_",c(1:nrow(protein_matched)))
+
+#### rna matched, reduce size by pre-choosing rna
+target_rna = c("CD38","IRF4","SDC1", "CD163",'IRF8')
+rna_matched = rna_all_used[codex_mtch_indx$rna_indice+1, target_rna]
+rownames(rna_matched) = paste0("pro_",c(1:nrow(rna_matched)))
+#
+rna_matched_n = as.data.frame(t(temp_norm@assays$temp@data[target_rna, codex_mtch_indx$rna_indice+1]))
+rownames(rna_matched_n) = paste0("pro_",c(1:nrow(rna_matched_n)))
+
+#### gene activity
+target_gas = c("CD38","IRF4","SDC1", "CD163",'IRF8')
+gas_matched = gas_used[codex_mtch_indx$atac_indice+1, target_gas]
+rownames(gas_matched) = paste0("pro_",c(1:nrow(gas_matched)))
+#
+gas_matched_n = as.data.frame(t(temp_norm2@assays$temp@data[target_gas, codex_mtch_indx$atac_indice+1]))
+rownames(gas_matched_n) = paste0("pro_",c(1:nrow(gas_matched_n)))
+
+#### tf z score
+target_tf = c("z:IRF4_632", "z:IRF8_633","z:NFKB1_719",
+              "z:SRF_641","z:KLF4_208","z:IRF4_632")
+tf_matched = tf_used[codex_mtch_indx$atac_indice+1, target_tf]
+rownames(tf_matched) = paste0("pro_",c(1:nrow(tf_matched)))
+
+```
+
+
+```{r}
+# for visualization purpose, we manually cap everything between 5-95% values
+
+##### capping after histogram check
+protein_matched$CD163[protein_matched$CD163 > 1.8] = 1.8
+protein_matched$CD163[protein_matched$CD163 < -0.2] = -0.2
+
+rna_matched_n$CD163[rna_matched_n$CD163 > 1.3] = 1.3
+gas_matched_n$CD163[gas_matched_n$CD163 > 0.7] = 0.7
+
+tf_matched$`z:IRF4_632`[tf_matched$`z:IRF4_632` > 6] = 6
+tf_matched$`z:IRF4_632`[tf_matched$`z:IRF4_632` < -3] = -3
+
+tf_matched$`z:IRF4_632`[tf_matched$`z:IRF4_632` > 6] = 6
+tf_matched$`z:IRF4_632`[tf_matched$`z:IRF4_632` < -3] = -3
+
+tf_matched$`z:KLF4_208`[tf_matched$`z:KLF4_208` > 3.8] = 3.8
+tf_matched$`z:KLF4_208`[tf_matched$`z:KLF4_208` < -6.5] = -6.5
+
+tf_matched$`z:KLF4_208`[tf_matched$`z:KLF4_208` > 9.5] = 9.5
+tf_matched$`z:KLF4_208`[tf_matched$`z:KLF4_208` < -1] = -1
+
+```
+
+
+
+```{r}
+################# start constructing a seurat object
+
+library(Seurat)
+hbmp_obj = CreateSeuratObject(counts=t(protein_matched),assay="pro")
+hbmp_obj = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(protein_matched), assay="pro")
+
+hbmp_obj[["rna"]]=CreateAssayObject(counts = t(rna_matched))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(rna_matched_n), assay="rna")
+
+hbmp_obj[["gas"]]=CreateAssayObject(counts = t(gas_matched))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(gas_matched_n), assay="gas")
+
+hbmp_obj[["tf"]]=CreateAssayObject(counts = t(tf_matched))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(tf_matched), assay="tf")
+
+# put embed
+codex_embd_2 = umapdf[c(1:cdx_num),]
+colnames(codex_embd_2) <- paste0("cca_", 1:2)
+rownames(codex_embd_2)=rownames(protein_matched)
+hbmp_obj[["cca"]] <- CreateDimReducObject(embeddings = as.matrix(codex_embd_2), key = "cca_", assay = "pro")
+
+## feature plot
+DefaultAssay(hbmp_obj) <- 'pro'
+p=FeaturePlot(hbmp_obj, features =  c("CD163"), ncol = 1, reduction = "cca", slot = 'data',
+              pt.size = 0.2,cols=c("lightgrey","#1F968BFF"), raster=FALSE)
+ggsave("/hubmap_fin/plot/CL_full21_cd163pro_norm_hh.png",p, height = 7, width = 8)
+p
+```
+
+
+```{r}
+## feature plot
+DefaultAssay(hbmp_obj) <- 'rna'
+p=FeaturePlot(hbmp_obj, features =  c("CD163"),
+              ncol = 1, reduction = "cca",
+              pt.size = 0.1,cols=c("lightgrey","#1F968BFF"), raster=FALSE)
+ggsave("/hubmap_fin/plot/CL_full21_cd163rna_norm_hh.png",p, height = 7, width = 8)
+p
+```
+
+```{r}
+## feature plot
+DefaultAssay(hbmp_obj) <- 'gas'
+p=FeaturePlot(hbmp_obj, features =  c("CD163"),
+              ncol = 1, reduction = "cca",
+              pt.size = 0.1,cols=c("lightgrey","#1F968BFF"), raster=FALSE)
+ggsave("/hubmap_fin/plot/CL_full21_cd163gas_norm_hh.png",p, height = 7, width = 8)
+p
+```
+
+
+#################
+
+Then we start to plot the spatial location version
+
+
+```{r}
+plot_prodf = cdx_cl_mc_sub[codex_mtch_indx$codex_indice+1,]
+
+target_rna = c("CD38","IRF4","SDC1", "CD163")
+plot_rnadf = as.data.frame(t(temp_norm@assays$temp@data[target_rna, codex_mtch_indx$rna_indice+1]))
+colnames(plot_rnadf) = c("rna_CD38","rna_IRF4","rna_SDC1", "rna_CD163")
+
+target_gas = c("CD38","IRF4","SDC1", "CD163")
+plot_gasdf = as.data.frame(t(temp_norm2@assays$temp@data[target_gas, codex_mtch_indx$atac_indice+1]))
+colnames(plot_gasdf) = c("gas_CD38","gas_IRF4","gas_SDC1", "gas_CD163")
+
+target_tf = c("z:IRF4_632", "z:IRF8_633","z:KLF4_208","z:SRF_641")
+plot_tfdf = tf_used[codex_mtch_indx$atac_indice+1, target_tf]
+colnames(plot_tfdf) = c("tf_IRF4","tf_IRF8","tf_KLF4","tf_SRF")
+
+plotall = do.call(cbind, list(plot_prodf, plot_rnadf, plot_gasdf, plot_tfdf))
+plotall_sub = subset(plotall, plotall$unique_region == "B006_Ascending") # cl cells 
+
+
+## first we plot the cell type locations
+p = ggplot(data = plotall_sub) + geom_point(aes(x = Xcorr, y = Ycorr, color  = cluster.term),
+                                        size = 0.5, stroke = 0.5, alpha = 1) +
+  theme(panel.background = element_rect(fill = 'black', colour = 'black'),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + scale_color_futurama()
+ggsave("/hubmap_fin/plot/CL_full21_img_cell_hh.png",p, height = 10, width = 13)
+p
+```
+
+```{r}
+# same value capping shceme as previous
+
+plotall_sub$CD163_n = plotall_sub$CD163
+plotall_sub$rna_CD163_n = plotall_sub$rna_CD163
+plotall_sub$gas_CD163_n = plotall_sub$gas_CD163
+plotall_sub$tf_IRF8_n = plotall_sub$tf_IRF8
+plotall_sub$tf_IRF4_n = plotall_sub$tf_IRF4
+plotall_sub$tf_KLF4_n = plotall_sub$tf_KLF4
+plotall_sub$tf_SRF_n = plotall_sub$tf_SRF
+
+quantile(plotall_sub$CD163_n, 0.05) # -0.2
+quantile(plotall_sub$CD163_n, 0.95) # 1.8
+
+quantile(plotall_sub$rna_CD163_n, 0.05) # 0
+quantile(plotall_sub$rna_CD163_n, 0.95) # 1.3
+
+quantile(plotall_sub$gas_CD163_n, 0.05) # 0
+quantile(plotall_sub$gas_CD163_n, 0.95) # 0.7
+
+quantile(plotall_sub$tf_IRF4_n, 0.05) # -3
+quantile(plotall_sub$tf_IRF4_n, 0.95) # 6
+
+quantile(plotall_sub$tf_KLF4_n, 0.05) # -6.5
+quantile(plotall_sub$tf_KLF4_n, 0.95) # 3.8
+
+quantile(plotall_sub$tf_SRF_n, 0.05) # -1
+quantile(plotall_sub$tf_SRF_n, 0.95) # 9.5
+
+##### capping after histogram check
+plotall_sub$CD163_n[plotall_sub$CD163_n > 1.8] = 1.8
+plotall_sub$CD163_n[plotall_sub$CD163_n < -0.2] = -0.2
+
+plotall_sub$rna_CD163_n[plotall_sub$rna_CD163_n > 1.3] = 1.3
+plotall_sub$gas_CD163_n[plotall_sub$gas_CD163_n > 0.7] = 0.7
+
+plotall_sub$tf_IRF4_n[plotall_sub$tf_IRF4_n > 6] = 6
+plotall_sub$tf_IRF4_n[plotall_sub$tf_IRF4_n < -3] = -3
+
+plotall_sub$tf_KLF4_n[plotall_sub$tf_KLF4_n > 3.8] = 3.8
+plotall_sub$tf_KLF4_n[plotall_sub$tf_KLF4_n < -6.5] = -6.5
+
+plotall_sub$tf_SRF_n[plotall_sub$tf_SRF_n > 9.5] = 9.5
+plotall_sub$tf_SRF_n[plotall_sub$tf_SRF_n < -1] = -1
+
+```
+
+```{r}
+p = ggplot() +
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr) ,colour = "white", size =1, alpha = 1, stroke = 0)+
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr, colour = CD163_n), size =2, alpha = 0.5, stroke = 0) +
+  theme_classic() + scale_colour_gradient(low = alpha("#171717", 0), high = "red") +
+  theme(panel.background = element_rect(fill = 'black', colour = 'black'),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggsave("/hubmap_fin/plot/CL_full21_img_proCD163_hh.png",p, height = 10, width = 12)
+p
+```
+
+```{r}
+p = ggplot() +
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr) ,colour = "white", size =1, alpha = 1, stroke = 0)+
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr, colour = rna_CD163_n), size =2, alpha = 0.5, stroke = 0) +
+  theme_classic() + scale_colour_gradient(low = alpha("#171717", 0), high = "red") +
+  theme(panel.background = element_rect(fill = 'black', colour = 'black'),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggsave("/hubmap_fin/plot/CL_full21_img_rnaCD163_hh.png",p, height = 10, width = 12)
+p
+
+```
+
+```{r}
+p = ggplot() +
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr) ,colour = "white", size =1, alpha = 1, stroke = 0)+
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr, colour = gas_CD163_n), size =2, alpha = 0.5, stroke = 0) +
+  theme_classic() + scale_colour_gradient(low = alpha("#171717", 0), high = "red") +
+  theme(panel.background = element_rect(fill = 'black', colour = 'black'),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggsave("/hubmap_fin/plot/CL_full21_img_gasCD163_hh.png",p, height = 10, width = 12)
+p
+
+```
+
+```{r}
+p = ggplot() +
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr) ,colour = "white", size =1, alpha = 1, stroke = 0)+
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr, colour = tf_IRF4_n), size =2, alpha = 0.5, stroke = 0) +
+  theme_classic() + scale_colour_gradient2(low = '#1BFFFF', mid =  alpha("#171717", 0), high = "#D4145A") +
+  theme(panel.background = element_rect(fill = 'black', colour = 'black'),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+ggsave("/hubmap_fin/plot/CL_full21_img_tfirf4_hh.png",p, height = 10, width = 12)
+p
+
+```
+
+```{r}
+p = ggplot() +
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr) ,colour = "white", size =1, alpha = 1, stroke = 0)+
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr, colour = tf_SRF_n), size =2, alpha = 0.5, stroke = 0) +
+  theme_classic() + scale_colour_gradient2(low = '#1BFFFF', mid =  alpha("#171717", 0), high = "#D4145A") +
+  theme(panel.background = element_rect(fill = 'black', colour = 'black'),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggsave("/hubmap_fin/plot/CL_full21_img_tfsrf_hh.png",p, height = 10, width = 12)
+p
+
+```
+
+```{r}
+p = ggplot() +
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr) ,colour = "white", size =1, alpha = 1, stroke = 0)+
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr, colour = tf_KLF4_n), size =2, alpha = 0.5, stroke = 0) +
+  theme_classic() + scale_colour_gradient2(low = '#1BFFFF', mid =  alpha("#171717", 0), high = "#D4145A") +
+  theme(panel.background = element_rect(fill = 'black', colour = 'black'),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggsave("/hubmap_fin/plot/CL_full21_img_tfklf4_hh.png",p, height = 10, width = 12)
+p
+
+```
+
+
+
+############### additionally we plotted more markers with the same scheme in the supplementary figures:
+
+
+```{r}
+# same code as previous read in data etc
+
+# prep the meta and count files
+`%notin%` <- Negate(`%in%`)
+###### start with codex
+cdx_cl_mc = read.csv("/hubmap_fin/data/b006_cl_cdx.csv") # 79k here
+cdx_cl_mc_sub = subset(cdx_cl_mc, cdx_cl_mc$cluster.term %notin% c('NK', 'Lymphatic', 'DC', 'Neutrophil', 'Nerve')) # 69273
+cdx_cl_mc_sub$cluster.term = gsub('CD4\\+ T cell','T',cdx_cl_mc_sub$cluster.term)
+cdx_cl_mc_sub$cluster.term = gsub('CD8\\+','T',cdx_cl_mc_sub$cluster.term)
+
+
+###### rna counts
+prefix = '/production/hubmap/match/data/'
+rna_names = read.csv(paste0(prefix,'SB_immune_rna_names.csv'))
+
+rna = readMM(paste0(prefix,"CL_immune_rna1X.txt"))
+rna = as.data.frame(as.matrix(rna))
+colnames(rna) = rna_names$names
+
+rna_stro  = readMM(paste0(prefix,"CL_stroma_rna1X.txt"))
+rna_stro = as.data.frame(as.matrix(rna_stro))
+colnames(rna_stro) = rna_names$names
+
+rna_epi  = readMM(paste0(prefix,"CL_epi_rna1X.txt"))
+rna_epi = as.data.frame(as.matrix(rna_epi))
+colnames(rna_epi) = rna_names$names
+
+rna_all = do.call(rbind, list(rna, rna_stro, rna_epi))
+
+## read rna meta data
+rna_meta = read.csv(paste0(prefix,"CL_immune_rna_meta1X.csv"))
+rna_stro_meta  = read.csv(paste0(prefix,"CL_stroma_rna_meta1X.csv"))
+rna_epi_meta  = read.csv(paste0(prefix,"CL_epi_rna_meta1X.csv"))
+rna_meta = rna_meta[,colnames(rna_epi_meta)]
+rna_all_meta = do.call(rbind, list(rna_meta, rna_stro_meta, rna_epi_meta))
+
+## remove
+rna_all_used = subset(rna_all, rna_all_meta$CellType2 %notin% c('NK', 'Lymphatic', 'Nerve'))
+rna_all_meta_used = subset(rna_all_meta, rna_all_meta$CellType2 %notin% c('NK', 'Lymphatic', 'Nerve'))
+rna_all_meta_used$CellType2 = gsub('CD4\\+ T cell','T',rna_all_meta_used$CellType2)
+rna_all_meta_used$CellType2 = gsub('CD8\\+ T cell','T',rna_all_meta_used$CellType2)
+
+
+######## gene activity score used
+prefix = '/hubmap_fin/data/'
+gas_names = read.csv(paste0(prefix,'hub_sub_genescore_names.csv'))
+
+gas = readMM(paste0(prefix,"hub_sub_genescore.txt"))
+gas = as.data.frame(as.matrix(gas))
+colnames(gas) = gas_names$names
+
+gas_meta = read.csv(paste0(prefix,"hub_sub_genescore_meta.csv"))
+
+## remove
+gas_used = subset(gas, gas_meta$tissue == 'cl')
+gas_meta_used = subset(gas_meta, gas_meta$tissue == 'cl')
+gas_meta_used$cluster.info = gsub('CD4\\+ T cell','T',gas_meta_used$cluster.info)
+gas_meta_used$cluster.info = gsub('CD8\\+ T cell','T',gas_meta_used$cluster.info)
+
+
+######## transcription factor calculated from atac information
+prefix = '/hubmap_fin/data/'
+tf_names = read.csv(paste0(prefix,'hub_sub_tf_names.csv'))
+
+tf = readMM(paste0(prefix,"hub_sub_tfzscore.txt"))
+tf = as.data.frame(as.matrix(tf))
+colnames(tf) = tf_names$names[871:1740]
+
+tf_used = subset(tf, gas_meta$tissue == 'cl')
+
+## okay finished
+
+
+# load embedding
+all_preumap = read.csv("/hubmap_fin/output/tri_int/cl_cdx_gcca_hh_preUmap.csv")
+#rna_row = nrow(rna_embd)
+#atac_row = nrow(atac_embd)
+#cdx_row = nrow(codex_embd)
+
+codex_embd = all_preumap[-c(1:(rna_row + atac_row)),]
+rna_embd = all_preumap[c(1:rna_row),]
+atac_embd = all_preumap[c((rna_row+1):(rna_row+ atac_row)),]
+
+# codex matched indexs
+codex_mtch_indx = read.csv('/hubmap_fin/output/tri_int/cl_cdx_full_indx_hh.csv')
+tri_embd = do.call(rbind, list(codex_embd[codex_mtch_indx$codex_indice+1,], rna_embd, atac_embd)) # only use codex cells that has matched
+cdx_num = dim(codex_embd[codex_mtch_indx$codex_indice+1,])[1]
+rna_num = dim(rna_embd)[1]
+atac_num = dim(atac_embd)[1]
+
+label_tri = c(rep('codex', cdx_num), rep('rna', rna_num), rep('atac', atac_num))
+
+library(Seurat)
+
+temp_obj2 <- CreateSeuratObject(counts = t(tri_embd)) # dummy
+temp_obj2 <- SetAssayData(object = temp_obj2, slot = "data", new.data = t(tri_embd)) # dummy
+temp_obj2 <- SetAssayData(object = temp_obj2, slot = "scale.data", new.data = t(tri_embd)) # dummy
+temp_obj2[["cca"]] <- CreateDimReducObject(embeddings = as.matrix(tri_embd),
+                                           key = "cca_", assay = DefaultAssay(temp_obj2))
+temp_obj2 <- RunUMAP(temp_obj2, reduction = 'cca',dims = 1:15)
+temp_obj2@meta.data$mod = label_tri
+umapdf = temp_obj2@reductions$umap@cell.embeddings
+DimPlot(temp_obj2, label = T, group.by = 'mod')
+```
+
+```{r}
+# before plotting the expression values, we can normalize rna and gas
+
+temp_norm = CreateSeuratObject(counts=t(rna_all_used),assay="temp")
+temp_norm = NormalizeData(temp_norm)
+
+temp_norm2 = CreateSeuratObject(counts=t(gas_used),assay="temp")
+temp_norm2 = NormalizeData(temp_norm2)
+
+#### protein matched
+protein_matched = cdx_cl_mc_sub[codex_mtch_indx$codex_indice+1,c(3:49)]
+rownames(protein_matched) = paste0("pro_",c(1:nrow(protein_matched)))
+
+#### rna matched, reduce size by pre-choosing rna
+target_rna = c("IRF4","SDC1", "CD163",'IRF8','MUC2','SDC1','CD19','MS4A1','ACTA2')
+rna_matched = rna_all_used[codex_mtch_indx$rna_indice+1, target_rna]
+rownames(rna_matched) = paste0("pro_",c(1:nrow(rna_matched)))
+#
+rna_matched_n = as.data.frame(t(temp_norm@assays$temp@data[target_rna, codex_mtch_indx$rna_indice+1]))
+rownames(rna_matched_n) = paste0("pro_",c(1:nrow(rna_matched_n)))
+
+#### gene activity
+target_gas = c("IRF4","SDC1", "CD163",'IRF8','MUC2','SDC1','CD19','MS4A1','ACTA2')
+gas_matched = gas_used[codex_mtch_indx$atac_indice+1, target_gas]
+rownames(gas_matched) = paste0("pro_",c(1:nrow(gas_matched)))
+#
+gas_matched_n = as.data.frame(t(temp_norm2@assays$temp@data[target_gas, codex_mtch_indx$atac_indice+1]))
+rownames(gas_matched_n) = paste0("pro_",c(1:nrow(gas_matched_n)))
+
+```
+
+
+```{r}
+### cap between 0.05 and 0.95
+quantile(protein_matched$aSMA, 0.05) #-0.3046136
+quantile(protein_matched$aSMA, 0.95) #3.046754
+quantile(rna_matched_n$MUC2, 0.05) #0
+quantile(rna_matched_n$MUC2, 0.95) #2.774372 
+quantile(gas_matched_n$MUC2, 0.05) #0
+quantile(gas_matched_n$MUC2, 0.95) #1.522134
+
+protein_matched$MUC2[protein_matched$MUC2 > 3] = 3
+protein_matched$MUC2[protein_matched$MUC2 < -0.3] = -0.3
+
+rna_matched_n$MUC2[rna_matched_n$MUC2 > 2.7] = 2.7
+gas_matched_n$MUC2[gas_matched_n$MUC2 > 1.5] = 1.5
+
+```
+
+```{r}
+################# start constructing a seurat object
+
+library(Seurat)
+hbmp_obj = CreateSeuratObject(counts=t(protein_matched),assay="pro")
+hbmp_obj = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(protein_matched), assay="pro")
+
+hbmp_obj[["rna"]]=CreateAssayObject(counts = t(rna_matched))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(rna_matched_n), assay="rna")
+
+hbmp_obj[["gas"]]=CreateAssayObject(counts = t(gas_matched))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(gas_matched_n), assay="gas")
+
+# put embed
+codex_embd_2 = umapdf[c(1:cdx_num),]
+colnames(codex_embd_2) <- paste0("cca_", 1:2)
+rownames(codex_embd_2)=rownames(protein_matched)
+hbmp_obj[["cca"]] <- CreateDimReducObject(embeddings = as.matrix(codex_embd_2), key = "cca_", assay = "pro")
+
+## feature plot
+DefaultAssay(hbmp_obj) <- 'pro'
+p=FeaturePlot(hbmp_obj, features =  c("MUC2"), ncol = 1, reduction = "cca", slot = 'data',
+              pt.size = 0.2,cols=c("lightgrey","#1F968BFF"), raster=FALSE)
+ggsave("/hubmap_fin/plot/CL_full21_muc2pro_norm_hh.png",p, height = 7, width = 8)
+p
+```
+
+```{r}
+## feature plot
+DefaultAssay(hbmp_obj) <- 'rna'
+p=FeaturePlot(hbmp_obj, features =  c("MUC2"),
+              ncol = 1, reduction = "cca",
+              pt.size = 0.1,cols=c("lightgrey","#1F968BFF"), raster=FALSE)
+ggsave("/hubmap_fin/plot/CL_full21_muc2rna_norm_hh.png",p, height = 7, width = 8)
+p
+```
+
+```{r}
+## feature plot
+DefaultAssay(hbmp_obj) <- 'gas'
+p=FeaturePlot(hbmp_obj, features =  c("MUC2"),
+              ncol = 1, reduction = "cca",
+              pt.size = 0.1,cols=c("lightgrey","#1F968BFF"), raster=FALSE)
+ggsave("/hubmap_fin/plot/CL_full21_muc2gas_norm_hh.png",p, height = 7, width = 8)
+p
+```
+
+```{r}
+plot_prodf = cdx_cl_mc_sub[codex_mtch_indx$codex_indice+1,]
+
+target_rna = c("CD38","IRF4","SDC1", "CD163","MUC2")
+plot_rnadf = as.data.frame(t(temp_norm@assays$temp@data[target_rna, codex_mtch_indx$rna_indice+1]))
+colnames(plot_rnadf) = c("rna_CD38","rna_IRF4","rna_SDC1", "rna_CD163","rna_MUC2")
+
+target_gas = c("CD38","IRF4","SDC1", "CD163","MUC2")
+plot_gasdf = as.data.frame(t(temp_norm2@assays$temp@data[target_gas, codex_mtch_indx$atac_indice+1]))
+colnames(plot_gasdf) = c("gas_CD38","gas_IRF4","gas_SDC1", "gas_CD163","gas_MUC2")
+
+plotall = do.call(cbind, list(plot_prodf, plot_rnadf, plot_gasdf))
+
+plotall_sub = subset(plotall, plotall$unique_region == "B006_Ascending")
+
+plotall_sub$MUC2[plotall_sub$MUC2 > 1.5] = 1.5
+plotall_sub$MUC2[plotall_sub$MUC2 < -0.3] = -0.3
+
+plotall_sub$rna_MUC2[plotall_sub$rna_MUC2 > 2.7] = 2.7
+plotall_sub$gas_MUC2[plotall_sub$gas_MUC2 > 1.5] = 1.5
+
+p = ggplot() +
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr) ,colour = "white", size =1, alpha = 1, stroke = 0)+
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr, colour = MUC2), size =2, alpha = 0.5, stroke = 0) +
+  theme_classic() + scale_colour_gradient(low = alpha("#171717", 0), high = "red") +
+  theme(panel.background = element_rect(fill = 'black', colour = 'black'),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+ggsave("/hubmap_fin/plot/CL_full21_img_proMUC2_hh.png",p, height = 10, width = 12)
+p
+```
+
+```{r}
+p = ggplot() +
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr) ,colour = "white", size =1, alpha = 1, stroke = 0)+
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr, colour = rna_MUC2), size =2, alpha = 0.5, stroke = 0) +
+  theme_classic() + scale_colour_gradient(low = alpha("#171717", 0), high = "red") +
+  theme(panel.background = element_rect(fill = 'black', colour = 'black'),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+ggsave("/hubmap_fin/plot/CL_full21_img_rnaMUC2_hh.png",p, height = 10, width = 12)
+p
+
+```
+
+```{r}
+p = ggplot() +
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr) ,colour = "white", size =1, alpha = 1, stroke = 0)+
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr, colour = gas_MUC2), size =2, alpha = 0.5, stroke = 0) +
+  theme_classic() + scale_colour_gradient(low = alpha("#171717", 0), high = "red") +
+  theme(panel.background = element_rect(fill = 'black', colour = 'black'),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggsave("/hubmap_fin/plot/CL_full21_img_gasMUC2_hh.png",p, height = 10, width = 12)
+p
+```
+
+```{r}
+### cap between 0.05 and 0.95
+quantile(protein_matched$aSMA, 0.05) #-0.36
+quantile(protein_matched$aSMA, 0.95) #3.1
+quantile(rna_matched_n$ACTA2, 0.05) #0
+quantile(rna_matched_n$ACTA2, 0.95) #2.8
+quantile(gas_matched_n$ACTA2, 0.05) #0
+quantile(gas_matched_n$ACTA2, 0.95) #1.5
+
+protein_matched$aSMA[protein_matched$aSMA > 3.1] = 3.1
+protein_matched$aSMA[protein_matched$aSMA < -0.36] = -0.36
+
+rna_matched_n$ACTA2[rna_matched_n$ACTA2 > 2.8] = 2.8
+gas_matched_n$ACTA2[gas_matched_n$ACTA2 > 1.5] = 1.5
+
+
+
+###########
+library(Seurat)
+hbmp_obj = CreateSeuratObject(counts=t(protein_matched),assay="pro")
+hbmp_obj = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(protein_matched), assay="pro")
+
+hbmp_obj[["rna"]]=CreateAssayObject(counts = t(rna_matched))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(rna_matched_n), assay="rna")
+
+hbmp_obj[["gas"]]=CreateAssayObject(counts = t(gas_matched))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(gas_matched_n), assay="gas")
+
+# put embed
+codex_embd_2 = umapdf[c(1:cdx_num),]
+colnames(codex_embd_2) <- paste0("cca_", 1:2)
+rownames(codex_embd_2)=rownames(protein_matched)
+hbmp_obj[["cca"]] <- CreateDimReducObject(embeddings = as.matrix(codex_embd_2), key = "cca_", assay = "pro")
+
+## feature plot
+DefaultAssay(hbmp_obj) <- 'pro'
+p=FeaturePlot(hbmp_obj, features =  c("aSMA"), ncol = 1, reduction = "cca", slot = 'data',
+              pt.size = 0.2,cols=c("lightgrey","#1F968BFF"), raster=FALSE)
+ggsave("/hubmap_fin/plot/CL_full21_aSMApro_norm_hh.png",p, height = 7, width = 8)
+p
+```
+
+```{r}
+## feature plot
+DefaultAssay(hbmp_obj) <- 'rna'
+p=FeaturePlot(hbmp_obj, features =  c("ACTA2"),
+              ncol = 1, reduction = "cca",#max.cutoff = 'q95',
+              pt.size = 0.1,cols=c("lightgrey","#1F968BFF"), raster=FALSE)
+ggsave("/hubmap_fin/plot/CL_full21_ACTA2rna_norm_hh.png",p, height = 7, width = 8)
+p
+```
+
+```{r}
+## feature plot
+DefaultAssay(hbmp_obj) <- 'gas'
+p=FeaturePlot(hbmp_obj, features =  c("ACTA2"),
+              ncol = 1, reduction = "cca",#max.cutoff = 'q95',
+              pt.size = 0.1,cols=c("lightgrey","#1F968BFF"), raster=FALSE)
+ggsave("/hubmap_fin/plot/CL_full21_ACTA2gas_norm_hh.png",p, height = 7, width = 8)
+p
+```
+
+```{r}
+plot_prodf = cdx_cl_mc_sub[codex_mtch_indx$codex_indice+1,]
+
+target_rna = c("IRF4","SDC1", "CD163","MUC2",'MS4A1','ACTA2')
+plot_rnadf = as.data.frame(t(temp_norm@assays$temp@data[target_rna, codex_mtch_indx$rna_indice+1]))
+colnames(plot_rnadf) = c("rna_CD38","rna_IRF4","rna_SDC1", "rna_CD163","rna_MUC2",'rna_MS4A1','rna_ACTA2')
+
+target_gas = c("IRF4","SDC1", "CD163","MUC2",'MS4A1','ACTA2')
+plot_gasdf = as.data.frame(t(temp_norm2@assays$temp@data[target_gas, codex_mtch_indx$atac_indice+1]))
+colnames(plot_gasdf) = c("gas_CD38","gas_IRF4","gas_SDC1", "gas_CD163","gas_MUC2",'gas_MS4A1','gas_ACTA2')
+
+plotall = do.call(cbind, list(plot_prodf, plot_rnadf, plot_gasdf))
+
+plotall_sub = subset(plotall, plotall$unique_region == "B006_Ascending")
+
+plotall_sub$aSMA[plotall_sub$aSMA > 3.1] = 3.1
+plotall_sub$aSMA[plotall_sub$aSMA < -0.36] = -0.36
+
+plotall_sub$rna_ACTA2[plotall_sub$rna_ACTA2 > 2.8] = 2.8
+plotall_sub$gas_ACTA2[plotall_sub$gas_ACTA2 > 1.5] = 1.5
+
+p = ggplot() +
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr) ,colour = "white", size =1, alpha = 1, stroke = 0)+
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr, colour = aSMA), size =2, alpha = 0.5, stroke = 0) +
+  theme_classic() + scale_colour_gradient(low = alpha("#171717", 0), high = "red") +
+  theme(panel.background = element_rect(fill = 'black', colour = 'black'),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+ggsave("/hubmap_fin/plot/CL_full21_img_proaSMA_hh.png",p, height = 10, width = 12)
+p
+```
+
+```{r}
+p = ggplot() +
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr) ,colour = "white", size =1, alpha = 1, stroke = 0)+
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr, colour = rna_ACTA2), size =2, alpha = 0.5, stroke = 0) +
+  theme_classic() + scale_colour_gradient(low = alpha("#171717", 0), high = "red") +
+  theme(panel.background = element_rect(fill = 'black', colour = 'black'),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+ggsave("/hubmap_fin/plot/CL_full21_img_rnaACTA2_hh.png",p, height = 10, width = 12)
+p
+
+```
+
+```{r}
+p = ggplot() +
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr) ,colour = "white", size =1, alpha = 1, stroke = 0)+
+  geom_point(data = plotall_sub, aes(Xcorr, Ycorr, colour = gas_ACTA2), size =2, alpha = 0.5, stroke = 0) +
+  theme_classic() + scale_colour_gradient(low = alpha("#171717", 0), high = "red") +
+  theme(panel.background = element_rect(fill = 'black', colour = 'black'),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggsave("/hubmap_fin/plot/CL_full21_img_gasACTA2_hh.png",p, height = 10, width = 12)
+p
+```

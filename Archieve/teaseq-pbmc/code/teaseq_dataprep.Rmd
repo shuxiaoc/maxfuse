@@ -1,0 +1,226 @@
+---
+title: "data_prep"
+output: html_document
+---
+
+
+Data prep script for teaseq
+
+```{r}
+# tea seq acquired from paper swanson et al, data :
+# https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4949911
+## using x061
+
+adt = read.csv("/ICICLE/data/GSM4949911_X061-AP0C1W1_leukopak_perm-cells_tea_fulldepth_adt_counts.csv", header = TRUE)
+#720,873 cells.... follow the filter standard described in the paper
+
+adt_pass = subset(adt, adt$total > 500) # 8k cells lol
+atac_meta = read.csv("/ICICLE/data/GSM4949911_X061-AP0C1W1_leukopak_perm-cells_tea_fulldepth_atac_filtered_metadata.csv", header = TRUE) # already filtered
+
+atac_meta$original_barcodes = gsub("-1","", atac_meta$original_barcodes)
+length(intersect(atac_meta$original_barcodes, adt_pass$cell_barcode)) #6k cell, enough for benchmarking
+
+use_barcode = intersect(atac_meta$original_barcodes, adt_pass$cell_barcode)
+atac_meta_use = atac_meta[match(use_barcode, atac_meta$original_barcodes),]
+adt_pass_use = adt_pass[match(use_barcode, adt_pass$cell_barcode),]
+
+atac_meta_use = atac_meta_use[-1,] # first cell discard
+adt_pass_use = adt_pass_use[-1,]
+write.csv(atac_meta_use, "/ICICLE/data/atac_meta.csv", row.names = F)
+# afterwards this meta file added wnn clustering locally
+write.csv(adt_pass_use, "/ICICLE/data/adt.csv", row.names = F)
+```
+
+# then we can process the fragment files
+
+```{r}
+library(ArchR)
+path1 = "/ICICLE/data/GSM4949911_X061-AP0C1W1_leukopak_perm-cells_tea_fulldepth_atac_filtered_fragments.tsv.gz"
+
+addArchRGenome("hg38")
+paths = c(path1)
+names(paths) = c("teaseq-well1")
+
+ArrowFiles_tea1 <- ArchR::createArrowFiles(
+  inputFiles = paths,
+  sampleNames = names(paths),
+  filterTSS = 4, #Dont set this too high because you can always increase later
+  filterFrags = 1000, 
+  addTileMat = TRUE,
+  minFrags = 500,
+  maxFrags = 1e+05,
+  addGeneScoreMat = TRUE,
+  nChunk = 5,
+  threads = 16,
+  cleanTmp = TRUE,
+  force = FALSE
+)
+
+# fast
+proj_tea1 <- ArchRProject(
+  ArrowFiles = ArrowFiles_tea1, 
+  outputDirectory = "tea_archr",
+  copyArrows = TRUE #This is recommened so that you maintain an unaltered copy for later usage.
+)
+
+proj_tea1 <- addIterativeLSI(
+    ArchRProj = proj_tea1,
+    useMatrix = "TileMatrix", 
+    name = "IterativeLSI", 
+    iterations = 2, 
+    clusterParams = list( #See Seurat::FindClusters
+        resolution = c(0.2), 
+        sampleCells = 10000, 
+        n.start = 10
+    ), 
+    varFeatures = 25000, 
+    dimsToUse = 1:50
+)
+
+proj_tea1 <- addUMAP(
+    ArchRProj = proj_tea1, 
+    reducedDims = "IterativeLSI", 
+    name = "UMAP", 
+    nNeighbors = 30, 
+    minDist = 0.5, 
+    metric = "cosine"
+)
+
+#### produce gene activity scores
+
+genescore_tea1 = getMatrixFromProject(
+  ArchRProj = proj_tea1,
+  useMatrix = "GeneScoreMatrix",
+  useSeqnames = NULL,
+  verbose = TRUE,
+  binarize = FALSE,
+  threads = getArchRThreads(),
+  logFile = createLogFile("getMatrixFromProject")
+)
+genescore_matrix_tea = t(genescore_tea1@assays@data$GeneScoreMatrix)
+genescore_matrix_tea = as(genescore_matrix_tea, "dgCMatrix") 
+genescore_names_tea = getFeatures(proj_tea1, useMatrix = "GeneScoreMatrix")
+
+cell_names = colnames(genescore_tea1@assays@data$GeneScoreMatrix)
+cell_names = gsub("teaseq-well1#","",cell_names)
+
+# make sure same as atac_meta_use $barcode sequence
+idx = match(atac_meta_use$barcodes, cell_names) # 
+
+writeMM(genescore_matrix_tea[idx,], "/ICICLE/data/genescore_tea.txt")
+rnainfo = data.frame(names = genescore_names_tea)
+write.csv(rnainfo, "/ICICLE/data/genescore_names_tea.csv")
+
+## save out lsi
+cell_names2 = proj_tea1$cellNames
+cell_names2 = gsub("teaseq-well1#","",cell_names2)
+idx = match(atac_meta_use$barcodes, cell_names2)
+lsi = proj_tea1@reducedDims$IterativeLSI@listData$matSVD
+lsi_filt = lsi[idx,]
+write.csv(lsi_filt, "/ICICLE/data/lsi_tea_50.csv")
+```
+
+
+Do clustering and manual annotation with seurat v4 wnn
+
+```{r}
+pro = read.csv("/tea/data/adt.csv")
+pro$cell_barcode <- NULL
+pro$total <- NULL
+rownames(pro) = paste0("cell", c(1:nrow(pro)))
+pro = t(pro)
+
+library(Matrix)
+atac = readMM("/tea/data/genescore_tea.txt")
+atac_name = read.csv("/tea/data/genescore_names_tea.csv")
+atac = as.data.frame(atac)
+colnames(atac) = atac_name$names
+rownames(atac) = paste0("cell", c(1:nrow(atac)))
+atac = t(atac)
+
+## create seurat v4 object
+library(Seurat)
+library(dplyr)
+teaobj <- CreateSeuratObject(counts = pro, assay = "AB")
+temp = CreateAssayObject(counts = atac, assay = "ATAC")
+teaobj[["ATAC"]] = temp
+
+DefaultAssay(teaobj) <- 'AB'
+VariableFeatures(teaobj) <- rownames(teaobj[["AB"]])
+teaobj <- NormalizeData(teaobj, normalization.method = 'CLR', margin = 2) %>% 
+  ScaleData() %>% RunPCA(reduction.name = 'apca')
+
+lsi = read.csv("/tea/data/lsi_tea_50.csv")
+lsi$X <- NULL
+colnames(lsi) <- paste0("lsi_", 1:50)
+rownames(lsi)=colnames(pro)
+teaobj[["lsi"]] <- CreateDimReducObject(embeddings = as.matrix(lsi), key = "lsi_", assay = "ATAC")
+
+## start clustering on the wnn embedding
+
+teaobj <- FindMultiModalNeighbors(teaobj, reduction.list = list("apca", "lsi"), dims.list = list(1:25, 2:50))
+teaobj <- RunUMAP(teaobj, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
+teaobj <- FindClusters(teaobj, graph.name = "wsnn", algorithm = 3, verbose = FALSE, resolution = 0.2)
+
+## manual annotation of the identified clusters
+
+new.cluster.ids <- c("CD4 naive","B","CD4 mem","Monocyte","CD8 meme","NK",
+                     "CD8 naive","CD8 eff","B","Monocyte")
+names(new.cluster.ids) <- levels(teaobj)
+teaobj <- RenameIdents(teaobj, new.cluster.ids)
+p3 <- DimPlot(teaobj, reduction = 'wnn.umap', label = TRUE) #+ NoLegend() # check umap
+p3
+
+# and save out
+meta = write.csv(meta,"/tea/data/atac_meta.csv", row.names = F)
+```
+
+
+calculate the adt pca embedding that will be used in slt and ari f1 score calculation
+
+
+```{r}
+# script to make the orig embedding for benchmarking
+# asap data
+library(Matrix)
+library(Seurat)
+# rna
+pro = read.csv("/ICICLE/data/adt.csv")
+pro$cell_barcode <- NULL
+pro$total <- NULL
+rownames(pro) = as.character(c(1:nrow(pro)))
+# lsi
+lsi = read.csv("/ICICLE/data/lsi_tea_50.csv")
+lsi = lsi[,c(-1,-2)]# remove the row index and first component
+rownames(lsi) = as.character(c(1:nrow(lsi)))
+# meta
+meta = read.csv("/ICICLE/data/atac_meta.csv")
+
+# use seurat as standard to produce reduction
+x_obj=CreateSeuratObject(counts=t(pro),assay="x")
+x_obj <- NormalizeData(x_obj)
+x_obj <- ScaleData(x_obj, features = rownames(x_obj))
+x_obj <- RunPCA(x_obj, features = rownames(x_obj))
+pca_adt = as.data.frame(x_obj@reductions$pca@cell.embeddings[,c(1:15)])
+pca_adt$label = meta$human_ann #### could change if we want different labels
+write.csv(pca_adt, "/ICICLE/data/orig_x.csv", row.names=FALSE)
+
+# produce lsi reduction -> you dont really need to
+lsi_peak = lsi[,c(1:15)]
+lsi_peak$label = meta$human_ann #### could change if we want different labels
+write.csv(lsi_peak, "/ICICLE/data/orig_y.csv", row.names=FALSE)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

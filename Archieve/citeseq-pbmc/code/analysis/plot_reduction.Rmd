@@ -1,0 +1,246 @@
+---
+title: "plot_reduction"
+output: html_document
+---
+
+Script to produce umap visual for all methods, including both full antibody version and drop (30) version
+
+
+#### read in embedding, from maxfuse and seurat
+
+```{r}
+# read in meta
+meta = read.csv("/home/bkzhu/super_mario/bench_test3/input/reduction/meta.csv")
+# read in mf reduction a
+mfx = read.csv("/home/bkzhu/super_mario/bench_test3/output/reduction/mf/full_embed_x0.csv")
+mfy = read.csv("/home/bkzhu/super_mario/bench_test3/output/reduction/mf/full_embed_y0.csv")
+mfxy = rbind(mfx,mfy)
+# read in sr reduction
+srx = read.csv("/home/bkzhu/super_mario/bench_test3/output/reduction/sr/full_embed_x0.csv")
+sry = read.csv("/home/bkzhu/super_mario/bench_test3/output/reduction/sr/full_embed_y0.csv")
+srxy = rbind(srx,sry)
+```
+
+make color lables
+
+```{r}
+label1=as.factor(c(rep("RNA",20000), rep("ADT",20000))) # mod
+label2=c(as.character(meta$celltype.l1), as.character(meta$celltype.l1)) # cell type
+label3=c(as.character(meta$celltype.l2), as.character(meta$celltype.l2)) # cell type lv2
+
+# 31 color just hard to visualize , we need to bin to make the coloring scheme readable (to ~20 cell types)
+label3[label3 == "NK Proliferating"] = "NK"
+label3[label3 == "NK_CD56bright"] = "NK"
+label3[label3 == "cDC2"] = "cDC"
+label3[label3 == "cDC1"] = "cDC"
+label3[label3 == "CD4 TCM"] = "CD4 TM"
+label3[label3 == "CD4 TEM"] = "CD4 TM"
+label3[label3 == "CD8 TCM"] = "CD8 TM"
+label3[label3 == "CD8 TEM"] = "CD8 TM"
+label3[label3 == "HSPC"] = "Other"
+label3[label3 == "ILC"] = "Other"
+label3[label3 == "Eryth"] = "Other"
+label3[label3 == "Doublet"] = "Other"
+label3[label3 == "dnT"] = "Other"
+label3[label3 == "ASDC"] = "Other"
+label3[label3 == "Plasmablast"] = "Other"
+```
+
+
+########## seurat part ###########
+
+```{r}
+library(Seurat)
+library(ggplot2)
+temp = srxy[,c(1:10)]
+rownames(temp) = paste0("cell_", c(1:nrow(temp)))
+temp_obj_umap <- CreateSeuratObject(counts = t(temp))
+temp_obj_umap <- RunUMAP(temp_obj_umap, features =  rownames(temp_obj_umap))
+embd = as.data.frame(temp_obj_umap@reductions$umap@cell.embeddings)
+p=ggplot(embd)  + 
+  geom_point(aes(x=UMAP_1, y=UMAP_2, color=label1,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "umap 1", y = "umap 2") + theme_classic() + ggtitle("sr") +
+  scale_color_manual(values = c("#fe4c4a", "#435571"))
+ggsave("/bench_test3/plots/umap_sr_mod.png", p, height = 6, width = 7.2)
+p
+```
+
+```{r}
+p1 = ggplot(embd)  + 
+  geom_point(aes(x=UMAP_1, y=UMAP_2, color=label3,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "tsne 1", y = "tsne 2") + theme_classic() + ggtitle("sr") +
+  scale_color_manual(values = c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#ffffff', '#000000'))
+ggsave("/bench_test3/plots/umap_sr_cell.png",p1,height = 6, width = 7.8)
+p1
+```
+
+
+
+####### maxfuse #######
+
+
+```{r}
+temp = mfxy[,c(1:10)]
+rownames(temp) = paste0("cell_", c(1:nrow(temp)))
+temp_obj_umap <- CreateSeuratObject(counts = t(temp))
+temp_obj_umap <- RunUMAP(temp_obj_umap, features =  rownames(temp_obj_umap))
+embd = as.data.frame(temp_obj_umap@reductions$umap@cell.embeddings)
+p=ggplot(embd)  + 
+  geom_point(aes(x=UMAP_1, y=UMAP_2, color=label1,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "umap 1", y = "umap 2") + theme_classic() + ggtitle("mf") +
+  scale_color_manual(values = c("#fe4c4a", "#435571"))
+ggsave("/bench_test3/plots/umap_mf_mod.png", p, height = 6, width = 7.2)
+p
+```
+
+```{r}
+p1 = ggplot(embd)  + 
+  geom_point(aes(x=UMAP_1, y=UMAP_2, color=label3,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "tsne 1", y = "tsne 2") + theme_classic() + ggtitle("mf") +
+  scale_color_manual(values = c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#ffffff', '#000000'))
+ggsave("/bench_test3/plots/umap_mf_cell.png",p1,height = 6, width = 7.8)
+p1
+```
+
+
+####### liger harmony bindsc ######
+
+```{r}
+# read in meta
+meta = read.csv("/home/bkzhu/super_mario/bench_test3/input/reduction/meta.csv")
+metalg = meta[-c(19958),] # note that one cell got deleted during liger process
+# read in lg reduction a
+lgx = read.csv("/home/bkzhu/super_mario/bench_test3/output/reduction/lgunimf/full_embed_x0.csv")
+lgy = read.csv("/home/bkzhu/super_mario/bench_test3/output/reduction/lgunimf/full_embed_y0.csv")
+lgxy = rbind(lgx,lgy)
+# read in hm reduction
+hmx = read.csv("/home/bkzhu/super_mario/bench_test3/output/reduction/hm/full_embed_x0.csv")
+hmy = read.csv("/home/bkzhu/super_mario/bench_test3/output/reduction/hm/full_embed_y0.csv")
+hmxy = rbind(hmx,hmy)
+# read in bsc reduction
+bscx = read.csv("/home/bkzhu/super_mario/bench_test3/output/reduction/bsc/full_embed_x0.csv")
+bscy = read.csv("/home/bkzhu/super_mario/bench_test3/output/reduction/bsc/full_embed_y0.csv")
+bscxy = rbind(bscx,bscy)
+```
+
+
+```{r}
+temp = hmxy[,c(1:10)]
+rownames(temp) = paste0("cell_", c(1:nrow(temp)))
+temp_obj_umap <- CreateSeuratObject(counts = t(temp))
+temp_obj_umap <- RunUMAP(temp_obj_umap, features =  rownames(temp_obj_umap))
+embd = as.data.frame(temp_obj_umap@reductions$umap@cell.embeddings)
+p=ggplot(embd)  + 
+  geom_point(aes(x=UMAP_1, y=UMAP_2, color=label1,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "umap 1", y = "umap 2") + theme_classic() + ggtitle("hm") +
+  scale_color_manual(values = c("#fe4c4a", "#435571"))
+ggsave("/bench_test3/plots/umap_hm_mod.png", p,  height = 6, width = 7.2)
+p
+```
+```{r}
+p1 = ggplot(embd)  + 
+  geom_point(aes(x=UMAP_1, y=UMAP_2, color=label3,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "tsne 1", y = "tsne 2") + theme_classic() + ggtitle("hm") +
+  scale_color_manual(values = c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#ffffff', '#000000'))
+ggsave("/bench_test3/plots/umap_hm_cell.png",p1,height = 6, width = 7.8)
+p1
+```
+
+```{r}
+temp = bscxy[,c(1:10)]
+rownames(temp) = paste0("cell_", c(1:nrow(temp)))
+temp_obj_umap <- CreateSeuratObject(counts = t(temp))
+temp_obj_umap <- RunUMAP(temp_obj_umap, features =  rownames(temp_obj_umap))
+embd = as.data.frame(temp_obj_umap@reductions$umap@cell.embeddings)
+p=ggplot(embd)  + 
+  geom_point(aes(x=UMAP_1, y=UMAP_2, color=label1,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "umap 1", y = "umap 2") + theme_classic() + ggtitle("bsc") +
+  scale_color_manual(values = c("#fe4c4a", "#435571"))
+ggsave("/bench_test3/plots/umap_bsc_mod.png", p, height = 6, width = 7.2)
+p
+```
+
+```{r}
+p1 = ggplot(embd)  + 
+  geom_point(aes(x=UMAP_1, y=UMAP_2, color=label3,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "tsne 1", y = "tsne 2") + theme_classic() + ggtitle("bsc") +
+  scale_color_manual(values = c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#ffffff', '#000000'))
+ggsave("/bench_test3/plots/umap_bsc_cell.png",p1,height = 6, width = 7.8)
+p1
+```
+
+
+#### remake the label meta info
+
+```{r}
+
+########### for hm and other methodds
+label1=as.factor(c(rep("RNA",20000), rep("ADT",20000))) # mod
+label2=c(as.character(meta$celltype.l1), as.character(meta$celltype.l1)) # cell type
+label3=c(as.character(meta$celltype.l2), as.character(meta$celltype.l2)) # cell type
+# bin cell types to ~ 20 for coloring
+label3[label3 == "NK Proliferating"] = "NK"
+label3[label3 == "NK_CD56bright"] = "NK"
+label3[label3 == "cDC2"] = "cDC"
+label3[label3 == "cDC1"] = "cDC"
+label3[label3 == "CD4 TCM"] = "CD4 TM"
+label3[label3 == "CD4 TEM"] = "CD4 TM"
+label3[label3 == "CD8 TCM"] = "CD8 TM"
+label3[label3 == "CD8 TEM"] = "CD8 TM"
+label3[label3 == "HSPC"] = "Other"
+label3[label3 == "ILC"] = "Other"
+label3[label3 == "Eryth"] = "Other"
+label3[label3 == "Doublet"] = "Other"
+label3[label3 == "dnT"] = "Other"
+label3[label3 == "ASDC"] = "Other"
+label3[label3 == "Plasmablast"] = "Other"
+
+############ for lg need to be special since cell missing
+
+labellg1=as.factor(c(rep("RNA",19999), rep("ADT",20000))) # mod
+labellg2=c(as.character(metalg$celltype.l1), as.character(meta$celltype.l1)) # cell type
+labellg3=c(as.character(metalg$celltype.l2), as.character(meta$celltype.l2)) # cell type
+
+# 31 color just hard to visualize , we need to bin to ~20 cell types for coloring
+labellg3[labellg3 == "NK Proliferating"] = "NK"
+labellg3[labellg3 == "NK_CD56bright"] = "NK"
+labellg3[labellg3 == "cDC2"] = "cDC"
+labellg3[labellg3 == "cDC1"] = "cDC"
+labellg3[labellg3 == "CD4 TCM"] = "CD4 TM"
+labellg3[labellg3 == "CD4 TEM"] = "CD4 TM"
+labellg3[labellg3 == "CD8 TCM"] = "CD8 TM"
+labellg3[labellg3 == "CD8 TEM"] = "CD8 TM"
+labellg3[labellg3 == "HSPC"] = "Other"
+labellg3[labellg3 == "ILC"] = "Other"
+labellg3[labellg3 == "Eryth"] = "Other"
+labellg3[labellg3 == "Doublet"] = "Other"
+labellg3[labellg3 == "dnT"] = "Other"
+labellg3[labellg3 == "ASDC"] = "Other"
+labellg3[labellg3 == "Plasmablast"] = "Other"
+```
+
+###### plotting
+
+```{r}
+temp = lgxy[,c(1:10)]
+rownames(temp) = paste0("cell_", c(1:nrow(temp)))
+temp_obj_umap <- CreateSeuratObject(counts = t(temp))
+temp_obj_umap <- RunUMAP(temp_obj_umap, features =  rownames(temp_obj_umap))
+embd = as.data.frame(temp_obj_umap@reductions$umap@cell.embeddings)
+p=ggplot(embd)  + 
+  geom_point(aes(x=UMAP_1, y=UMAP_2, color=label1,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "umap 1", y = "umap 2") + theme_classic() + ggtitle("lg") +
+  scale_color_manual(values = c("#fe4c4a", "#435571"))
+ggsave("/bench_test3/plots/umap_lgunimf_mod.png", p, height = 6, width = 7.2)
+p
+```
+
+```{r}
+p1 = ggplot(embd)  + 
+  geom_point(aes(x=UMAP_1, y=UMAP_2, color=label3,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "tsne 1", y = "tsne 2") + theme_classic() + ggtitle("sr") +
+  scale_color_manual(values = c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#ffffff', '#000000'))
+ggsave("/bench_test3/plots/umap_lgunimf_cell.png",p1,height = 6, width = 7.8)
+p1
+```
+

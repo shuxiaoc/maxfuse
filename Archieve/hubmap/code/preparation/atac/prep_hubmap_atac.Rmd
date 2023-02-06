@@ -1,0 +1,389 @@
+---
+title: "prep_atac"
+output: html_document
+---
+
+Input of snATAC data are fragment files, from paper: https://www.biorxiv.org/content/10.1101/2021.11.25.469203v1.abstract
+Data acquired from author: Winston R. Becker, via Stanford server internal transfer
+Source data sharable per request.
+
+First read in all the fragment files:
+
+```{r,message = FALSE}
+library(ArchR)
+
+b05101 = "/production/hubmap/hubmap_atac/B005-A-101_fragments.tsv.gz"
+b05201 = "/production/hubmap/hubmap_atac/B005-A-201_fragments.tsv.gz"
+b05301 = "/production/hubmap/hubmap_atac/B005-A-301-D_20200917_fragments.tsv.gz"
+b05401 = "/production/hubmap/hubmap_atac/B005-A-401_fragments.tsv.gz"
+b05402 = "/production/hubmap/hubmap_atac/B005-A-402_fragments.tsv.gz"
+b05002 = "/production/hubmap/hubmap_atac/B005-A-002_fragments.tsv.gz"
+b05001 = "/production/hubmap/hubmap_atac/B005-A-001_fragments.tsv.gz"
+b05501 = "/production/hubmap/hubmap_atac/B005-A-501-D_20200917_fragments.tsv.gz"
+
+b04504 = "/production/hubmap/hubmap_atac/B004-A-504-D_20200715_fragments.tsv.gz"
+b04408 = "/production/hubmap/hubmap_atac/B004-A-408-D_20200715_fragments.tsv.gz"
+b04404 = "/production/hubmap/hubmap_atac/B004-A-404-D_20200817_fragments.tsv.gz"
+b04304 = "/production/hubmap/hubmap_atac/B004-A-304-D_20200702_fragments.tsv.gz"
+b04204 = "/production/hubmap/hubmap_atac/B004-A-204-D_20200702_fragments.tsv.gz"
+b04008 = "/production/hubmap/hubmap_atac/B004-A-008-D_20200817_fragments.tsv.gz"
+b04004 = "/production/hubmap/hubmap_atac/B004-A-004-D_20200715_fragments.tsv.gz"
+
+b01001 = "/production/hubmap/hubmap_atac/B001-A-001-D_20200715_fragments.tsv.gz"
+b01006 = "/production/hubmap/hubmap_atac/B001-A-006-D_20200715_fragments.tsv.gz"
+b01101 = "/production/hubmap/hubmap_atac/B001-A-101-D_20200804_fragments.tsv.gz"
+b01201 = "/production/hubmap/hubmap_atac/B001-A-201-D_08042020_fragments.tsv.gz"
+b01301 = "/production/hubmap/hubmap_atac/B001-A-301-D_20200804_fragments.tsv.gz"
+b01302 = "/production/hubmap/hubmap_atac/B001-A-302-D_fragments.tsv.gz"
+b01401 = "/production/hubmap/hubmap_atac/B001-A-401-D_fragments.tsv.gz"
+b01406 = "/production/hubmap/hubmap_atac/B001-A-406-D_fragments.tsv.gz"
+b01501 = "/production/hubmap/hubmap_atac/B001-A-501-D_fragments.tsv.gz"
+
+b06001 = "/production/hubmap/hubmap_atac/B006-A-001_atac_fragments.tsv.gz"
+b06002 = "/production/hubmap/hubmap_atac/B006-A-002_atac_fragments.tsv.gz"
+b06101 = "/production/hubmap/hubmap_atac/B006-A-101_atac_fragments.tsv.gz"
+b06201 = "/production/hubmap/hubmap_atac/B006-A-201_atac_fragments.tsv.gz"
+b06201_r2 = "/production/hubmap/hubmap_atac/B006-A-201-R2_atac_fragments.tsv.gz"
+b06301 = "/production/hubmap/hubmap_atac/B006-A-301_atac_fragments.tsv.gz"
+b06401 = "/production/hubmap/hubmap_atac/B006-A-401_atac_fragments.tsv.gz"
+b06402 = "/production/hubmap/hubmap_atac/B006-A-402_atac_fragments.tsv.gz"
+b06501 = "/production/hubmap/hubmap_atac/B006-A-501_atac_fragments.tsv.gz"
+
+paths = c(b05101,b05201,b05301,b05401,b05402,b05002,b05001,b05501,
+          b04504,b04408,b04404,b04304,b04204,b04008,b04004,
+          b06001, b06002, b06101, b06201, b06201_r2, b06301,
+          b06401, b06402, b06501, b01001, b01006, b01101,
+          b01201, b01301, b01302, b01401, b01406, b01501)
+
+names(paths) = c("b05101","b05201","b05301","b05401","b05402",
+                 "b05002","b05001","b05501","b04504","b04408","b04404","b04304",
+                 "b04204","b04008","b04004", "b06001","b06002",
+                 "b06101","b06201","b06201_r2","b06301","b06401",
+                 "b06402","b06501","b01001", "b01006", "b01101",
+                 "b01201","b01301","b01302","b01401","b01406","b01501")
+
+addArchRGenome("hg38")
+ArrowFiles_hubmap <- ArchR::createArrowFiles(
+  inputFiles = paths,
+  sampleNames = names(paths),
+  filterTSS = 4, #Dont set this too high because you can always increase later
+  filterFrags = 1000, 
+  addTileMat = TRUE,
+  minFrags = 500,
+  maxFrags = 1e+05,
+  addGeneScoreMat = TRUE,
+  nChunk = 1
+)
+
+# fast
+proj_hub <- ArchRProject(
+  ArrowFiles = ArrowFiles_hubmap, 
+  outputDirectory = "/production/hubmap/atac_output",
+  copyArrows = TRUE #This is recommened so that you maintain an unaltered copy for later usage.
+)
+```
+
+
+Read in the corresponding meta information etc and change the cell barcode names etc
+
+```{r}
+require(data.table)
+data_immune <- as.data.frame(fread("/production/hubmap/hubmap_atac/cellAnnotationsimmune.tsv"))
+data_stro <- as.data.frame(fread("/production/hubmap/hubmap_atac/cellAnnotationsstromal.tsv"))
+data_epi1 <- as.data.frame(fread("/production/hubmap/hubmap_atac/cellAnnotationsepithelial_duodenum.tsv"))
+data_epi2 <- as.data.frame(fread("/production/hubmap/hubmap_atac/cellAnnotationsepithelial_ileum.tsv"))
+data_epi3 <- as.data.frame(fread("/production/hubmap/hubmap_atac/cellAnnotationsepithelial_jejunum.tsv"))
+data4 = as.data.frame(fread("/production/hubmap/hubmap_atac/cellAnnotationsepithelial_colon.tsv"))
+meta_all = rbind(data_immune,data_stro)
+meta_all = rbind(meta_all,data_epi1)
+meta_all = rbind(meta_all,data_epi2)
+meta_all = rbind(meta_all,data_epi3)
+meta_all = rbind(meta_all,data4)
+
+meta_all$cellsNamesToAdd = gsub("B005-A-402",'b05402',meta_all$cellsNamesToAdd)#
+meta_all$cellsNamesToAdd = gsub( "B005-A-401", 'b05401',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub("B005-A-301", 'b05301', meta_all$cellsNamesToAdd)#
+meta_all$cellsNamesToAdd = gsub( "B005-A-201", 'b05201',meta_all$cellsNamesToAdd)#
+meta_all$cellsNamesToAdd = gsub( "B005-A-101", 'b05101',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B005-A-001", 'b05001',meta_all$cellsNamesToAdd)#
+meta_all$cellsNamesToAdd = gsub( "B005-A-002", 'b05002',meta_all$cellsNamesToAdd)#
+meta_all$cellsNamesToAdd = gsub( "B005-A-501", 'b05501',meta_all$cellsNamesToAdd)
+
+meta_all$cellsNamesToAdd = gsub( "B004-A-504", 'b04504',meta_all$cellsNamesToAdd)#
+meta_all$cellsNamesToAdd = gsub( "B004-A-408", 'b04408',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B004-A-404#", 'b04404#',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B004-A-304", 'b04304',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B004-A-204", 'b04204',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B004-A-008", 'b04008',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B004-A-004", 'b04004',meta_all$cellsNamesToAdd)
+
+meta_all$cellsNamesToAdd = gsub( "B001-A-001", 'b01001',meta_all$cellsNamesToAdd)#
+meta_all$cellsNamesToAdd = gsub( "B001-A-006", 'b01006',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B001-A-101", 'b01101',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B001-A-201", 'b01201',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B001-A-301", 'b01301',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B001-A-302", 'b01302',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B001-A-401", 'b01401',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B001-A-406", 'b01406',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B001-A-501", 'b01501',meta_all$cellsNamesToAdd)
+
+meta_all$cellsNamesToAdd = gsub( "B006-A-001", 'b06001',meta_all$cellsNamesToAdd)#
+meta_all$cellsNamesToAdd = gsub( "B006-A-002", 'b06002',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B006-A-101", 'b06101',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B006-A-201#", 'b06201#',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B006-A-201-R2", 'b06201_r2',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B006-A-301", 'b06301',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B006-A-401", 'b06401',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B006-A-402", 'b06402',meta_all$cellsNamesToAdd)
+meta_all$cellsNamesToAdd = gsub( "B006-A-501", 'b06501',meta_all$cellsNamesToAdd)
+
+idxPass <- which(proj_hub$cellNames %in% meta_all$cellsNamesToAdd)
+cellsPass <- proj_hub$cellNames[idxPass]
+annotate <- meta_all$clusterNamesToAdd[meta_all$cellsNamesToAdd %in% cellsPass]
+names <- meta_all$cellsNamesToAdd[meta_all$cellsNamesToAdd %in% cellsPass]
+proj_hub <- addCellColData(ArchRProj = proj_hub, data = paste0(annotate),
+    cells = names, name = "hub_ann", force = TRUE)
+
+proj_hub_sub1 <- subsetCells(ArchRProj = proj_hub, cellNames = cellsPass) # 140k cells
+table(as.character(proj_hub_sub1@cellColData$hub_ann))
+```
+
+Remove cells that will not be used during MaxFuse integration
+
+```{r}
+# first although the annotation is not optimal, we dont need certain cells that are not matched by codex
+`%notin%` <- Negate(`%in%`)
+
+idxPass2 <- which(proj_hub_sub1@cellColData$hub_ann %notin% c("TA1","TA2","MAST","Paneth","Gila","Stem","Secretory Unknown","Tuft","Pericytes", "NK Cells"))
+cellsPass2 <- proj_hub_sub1$cellNames[idxPass2]
+proj_hub_sub2 <- subsetCells(ArchRProj = proj_hub_sub1, cellNames = cellsPass2) # 140k cells
+table(as.character(proj_hub_sub2@cellColData$hub_ann))
+```
+
+Then standard archr processing pipeline:
+
+```{r}
+proj_hub_sub2 <- addIterativeLSI(
+    ArchRProj = proj_hub_sub2,
+    useMatrix = "TileMatrix", 
+    name = "IterativeLSI", 
+    iterations = 2, 
+    clusterParams = list( #See Seurat::FindClusters
+        resolution = c(0.2), 
+        sampleCells = 10000, 
+        n.start = 10
+    ), 
+    varFeatures = 25000, 
+    dimsToUse = 1:100, # used 100 here to produce lsi100
+    force = TRUE
+)
+
+proj_hub_sub2 <- addHarmony(
+    ArchRProj = proj_hub_sub2,
+    reducedDims = "IterativeLSI",
+    name = "Harmony",
+    groupBy = "Sample",
+    force = TRUE
+)
+
+### this takes very long time if lsi comp large
+proj_hub_sub2 <- addClusters(
+    input = proj_hub_sub2,
+    reducedDims = "Harmony",
+    method = "Seurat",
+    name = "Clusters",
+    resolution = 1.2,
+    force = TRUE
+)
+
+#proj_hub_sub2 <- addUMAP(ArchRProj = proj_hub_sub2, reducedDims = "Harmony", nNeighbors = 30,force = TRUE)
+#p1 <- plotEmbedding(ArchRProj = proj_hub_sub2, colorBy = "cellColData", name = "Clusters", embedding = "UMAP", size = 0.05)
+#p2 <- plotEmbedding(ArchRProj = proj_hub_sub2, colorBy = "cellColData", name = "hub_ann", embedding = "UMAP", size = 0.05)
+#ggAlignPlots(p1,p2, type = "h")
+
+```
+
+Change cell type names to make them consistent naming scheme in codex dataset:
+
+```{r}
+ann = as.character(proj_hub_sub2@cellColData$hub_ann)
+ann[ann == "Best4+ Enterocytes"] = "Enterocyte"
+ann[ann == "Enterocytes"] = "Enterocyte"
+ann[ann == "Myofibroblasts 1"] = "Smooth muscle"
+ann[ann == "Myofibroblasts 2"] = "Smooth muscle"
+ann[ann == "Myofibroblasts 3"] = "Smooth muscle"
+ann[ann == "Crypt Fibroblasts 1"] = "Stroma"
+ann[ann == "Crypt Fibroblasts 2"] = "Stroma"
+ann[ann == "Crypt Fibroblasts 3"] = "Stroma"
+ann[ann == "Crypt Fibroblasts 4"] = "Stroma"
+ann[ann == "Villus Fibroblasts WNT5B+"] = "Stroma"
+ann[ann == "Crypt Fibroblasts RSPO3+"] = "Stroma"
+ann[ann == "Enteroendocrine2"] = "Enteroendocrine"
+ann[ann == "Crypt Fibroblasts 3"] = "Stroma"
+ann[ann == "Crypt Fibroblasts 4"] = "Stroma"
+ann[ann == "Glia"] = "Nerve"
+ann[ann == "Immature Goblet"] = "Goblet"
+ann[ann == "Macrophages"] = "Mono_Macrophages"
+ann[ann == "CD4+ T Cells"] = "CD4+ T cell"
+ann[ann == "CD8+ T Cells"] = "CD8+ T cell"
+```
+
+Save out gene activity scores (used during MaxFuse)
+
+```{r}
+### this is an attemp to look at bk annotations
+genescore_hub = getMatrixFromProject(
+  ArchRProj = proj_hub_sub2,
+  useMatrix = "GeneScoreMatrix",
+  useSeqnames = NULL,
+  verbose = TRUE,
+  binarize = FALSE,
+  threads = getArchRThreads(),
+  logFile = createLogFile("getMatrixFromProject")
+)
+genescore_matrix_hub = t(genescore_hub@assays@data$GeneScoreMatrix)
+genescore_matrix_hub = as(genescore_matrix_hub, "dgCMatrix")
+genescore_names_hub = getFeatures(proj_hub_sub2, useMatrix = "GeneScoreMatrix")
+# only save out labels correct ones
+
+idx = ann %in% c('B Cells', 'CD4+ T cell', 'CD8+ T cell', 'Endothelial', 'Goblet',
+       'Mono_Macrophages', 'Plasma', 'Smooth muscle', 'Stroma', "Enteroendocrine")
+names = proj_hub_sub2$cellNames[idx]
+type = ann[idx]
+seurat = proj_hub_sub2$Clusters[idx]
+idx2 = match(names, colnames(genescore_hub@assays@data$GeneScoreMatrix))
+sample = as.character(proj_hub_sub2@cellColData$Sample)[idx]
+
+library(Matrix)
+op_hub = genescore_matrix_hub[idx2,]
+writeMM(op_hub, "/hubmap_fin/data/hub_sub_genescore.txt")
+rnainfo = data.frame(names = genescore_names_hub)
+write.csv(rnainfo, "/hubmap_fin/data/hub_sub_genescore_names.csv")
+```
+
+Manually give in the information between cell barcodes and tissue location:
+
+```{r}
+# get sb cl information
+cellid = proj_hub_sub2$cellNames
+cellid = gsub("b01001.*",'sb',cellid)#
+cellid = gsub("b01006.*",'sb',cellid)#
+cellid = gsub("b01101.*",'sb',cellid)#
+cellid = gsub("b01201.*",'sb',cellid)#
+cellid = gsub("b01301.*",'cl',cellid)#
+cellid = gsub("b01302.*",'cl',cellid)#
+cellid = gsub("b01401.*",'cl',cellid)#
+cellid = gsub("b01406.*",'cl',cellid)#
+cellid = gsub("b01501.*",'cl',cellid)#
+
+cellid = gsub("b04004.*",'cl',cellid)#
+cellid = gsub("b04004.*",'cl',cellid)#
+cellid = gsub("b04008.*",'cl',cellid)#
+cellid = gsub("b04104.*",'cl',cellid)#
+cellid = gsub("b04204.*",'cl',cellid)#
+cellid = gsub("b04304.*",'cl',cellid)#
+cellid = gsub("b04404.*",'sb',cellid)#
+cellid = gsub("b04408.*",'sb',cellid)#
+cellid = gsub("b04504.*",'sb',cellid)#
+
+cellid = gsub("b05501.*",'sb',cellid)#
+cellid = gsub("b05402.*",'sb',cellid)#
+cellid = gsub("b05401.*",'sb',cellid)#
+cellid = gsub("b05301.*",'sb',cellid)#
+cellid = gsub("b05201.*",'cl',cellid)#
+cellid = gsub("b05101.*",'cl',cellid)#
+cellid = gsub("b05002.*",'cl',cellid)#
+cellid = gsub("b05001.*",'cl',cellid)#
+
+cellid = gsub("b06501.*",'sb',cellid)#
+cellid = gsub("b06401.*",'sb',cellid)#
+cellid = gsub("b06402.*",'sb',cellid)#
+cellid = gsub("b06301.*",'sb',cellid)#
+cellid = gsub("b06201-r2.*",'cl',cellid)#
+cellid = gsub("b06201.*",'cl',cellid)#
+cellid = gsub("b06101.*",'cl',cellid)#
+cellid = gsub("b06002.*",'cl',cellid)#
+cellid = gsub("b06001.*",'cl',cellid)#
+```
+
+Save out meta information and LSI (harmony version based on samples, used during MaxFuse):
+
+```{r}
+rna_meta = data.frame(cell.id = names,
+                      tissue = cellid[idx],
+                      sample = sample,
+                      cluster.info = type,
+                      seurat.label = seurat)
+write.csv(rna_meta, "/hubmap_fin/data/hub_sub_genescore_meta.csv")
+
+# save out the harmony version
+lsi100_harmony = proj_hub_sub2@reducedDims$Harmony@listData$matDR[idx,]
+write.csv(lsi100_harmony, "/hubmap_fin/data/hub_sub_lsi100_harmony.csv", row.names = F)
+```
+
+Then we calculate TF enrichment scores, using ChromVAR
+
+```{r}
+pathToMacs2 <- '/home/bkzhu/python/miniconda3/envs/atac/bin/macs2'
+
+# add psuedo groups
+proj_hub_sub2 <- addGroupCoverages(ArchRProj = proj_hub_sub2, groupBy = "Clusters")
+
+# macs2 calling peaks
+proj_hub_sub2 <- addReproduciblePeakSet(
+    ArchRProj = proj_hub_sub2, 
+    groupBy = "Clusters", 
+    pathToMacs2 = pathToMacs2,
+    threads = 1
+)
+getPeakSet(proj_hub_sub2) # peaks look good
+
+proj_hub_sub2 <- addPeakMatrix(proj_hub_sub2)
+
+# check for motifs
+
+proj_hub_sub2 <- addMotifAnnotations(ArchRProj = proj_hub_sub2, motifSet = "cisbp", name = "Motif")
+
+
+library(chromVAR)
+#proj_hub_sub2 <- chromVAR::getBackgroundPeaks(proj_hub_sub2)
+proj_hub_sub3 <- addBgdPeaks(proj_hub_sub2, method = "chromVAR")
+
+proj_hub_sub3 <- addDeviationsMatrix(
+  ArchRProj = proj_hub_sub3, 
+  peakAnnotation = "Motif",
+  force = TRUE
+)
+
+
+## extract dev matrix
+tf_hub = getMatrixFromProject(
+  ArchRProj = proj_hub_sub3,
+  useMatrix = "MotifMatrix",
+  useSeqnames = NULL,
+  verbose = TRUE,
+  binarize = FALSE,
+  threads = getArchRThreads(),
+  logFile = createLogFile("getMatrixFromProject")
+)
+
+
+tf_matrix_hub = t(tf_hub@assays@data$z) ### using z scores here
+tf_matrix_hub = as(tf_matrix_hub, "dgCMatrix")
+tf_names_hub = getFeatures(proj_hub_sub3, useMatrix = "MotifMatrix")
+
+
+# only save out labels correct ones
+
+idx = ann %in% c('B Cells', 'CD4+ T cell', 'CD8+ T cell', 'Endothelial', 'Goblet',
+       'Mono_Macrophages', 'Plasma', 'Smooth muscle', 'Stroma', "Enteroendocrine")
+names = proj_hub_sub3$cellNames[idx]
+idx2 = match(names, colnames(tf_hub@assays@data$z))
+
+# save out
+library(Matrix)
+tfz_hub = tf_matrix_hub[idx2,]
+writeMM(tfz_hub, "/hubmap_fin/data/hub_sub_tfzscore.txt")
+rnainfo = data.frame(names = tf_names_hub)
+write.csv(rnainfo, "/hubmap_fin/data/hub_sub_tf_names.csv")
+```

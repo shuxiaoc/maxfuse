@@ -1,0 +1,227 @@
+---
+title: "prep_retina"
+output: html_document
+---
+
+code to human retinal cells (scATAC/scRNA multiome dataset from https://www.sciencedirect.com/science/article/pii/S2666979X22001069 by Chang lab):
+fragment files directly retrieved from GEO GSM5866073. (fragment files by cell type)
+We first use Archr to calculate the gene activity scores (used for Maxfuse etc)
+
+
+```{r}
+library(ArchR)
+
+AIIamacrine = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/GSM5866073_AIIamacrine_frags.sort.tsv.gz"
+Astrocyte = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/GSM5866073_Astrocyte_frags.sort.tsv.gz"
+Cone = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/GSM5866073_Cone_frags.sort.tsv.gz"
+GABAamacrine = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/GSM5866073_GABAamacrine_frags.sort.tsv.gz"
+Glyamacrine = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/GSM5866073_Glyamacrine_frags.sort.tsv.gz"
+Horizontal = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/GSM5866073_Horizontal_frags.sort.tsv.gz"
+Microglia = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/GSM5866073_Microglia_frags.sort.tsv.gz"
+Mullerglia = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/GSM5866073_Mullerglia_frags.sort.tsv.gz"
+OFFconebipolar = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/GSM5866073_OFFconebipolar_frags.sort.tsv.gz"
+ONconebipolar = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/GSM5866073_ONconebipolar_frags.sort.tsv.gz"
+Retinalganglioncell = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/GSM5866073_Retinalganglioncell_frags.sort.tsv.gz"
+Rodbipolar = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/GSM5866073_Rodbipolar_frags.sort.tsv.gz"
+Rod = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/GSM5866073_Rod_frags.sort.tsv.gz"
+
+paths = c(AIIamacrine,Astrocyte,Cone,GABAamacrine,Glyamacrine,Horizontal,Microglia,
+          Mullerglia, OFFconebipolar, ONconebipolar, Retinalganglioncell, Rodbipolar, Rod)
+
+names(paths) = c("AIIamacrine", "Astrocyte", "Cone", "GABAamacrine", "Glyamacrine", "Horizontal",
+                 "Microglia", "Mullerglia", "OFFconebipolar", "ONconebipolar", "Retinalganglioncell",
+                 "Rodbipolar", "Rod")
+
+addArchRGenome("hg38")
+
+ArrowFiles_retina <- ArchR::createArrowFiles(
+  inputFiles = paths,
+  sampleNames = names(paths),
+  filterTSS = 4, #Dont set this too high because you can always increase later
+  filterFrags = 1000, 
+  addTileMat = TRUE,
+  minFrags = 500,
+  maxFrags = 1e+05,
+  addGeneScoreMat = TRUE,
+  nChunk = 2
+)
+ArrowFiles_retina
+```
+
+
+```{r}
+# fast
+proj_retina <- ArchRProject(
+  ArrowFiles = ArrowFiles_retina, 
+  outputDirectory = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac/",
+  copyArrows = FALSE #This is recommened so that you maintain an unaltered copy for later usage.
+)
+
+#length(proj_retina$cellNames) # 50969 cells
+```
+
+```{r}
+proj_retina <- addIterativeLSI(
+    ArchRProj = proj_retina,
+    useMatrix = "TileMatrix", 
+    name = "IterativeLSI", 
+    iterations = 2, 
+    clusterParams = list( #See Seurat::FindClusters
+        resolution = c(0.2), 
+        sampleCells = 10000, 
+        n.start = 10
+    ), 
+    varFeatures = 25000, 
+    dimsToUse = 1:50
+)
+
+genescore_hub = getMatrixFromProject(
+  ArchRProj = proj_retina,
+  useMatrix = "GeneScoreMatrix",
+  useSeqnames = NULL,
+  verbose = TRUE,
+  binarize = FALSE,
+  threads = getArchRThreads(),
+  logFile = createLogFile("getMatrixFromProject")
+)
+
+genescore_matrix_hub = t(genescore_hub@assays@data$GeneScoreMatrix)
+genescore_matrix_hub = genescore_matrix_hub[proj_retina$cellNames,] # important
+genescore_matrix_hub = as(genescore_matrix_hub, "dgCMatrix")
+genescore_names_hub = getFeatures(proj_retina, useMatrix = "GeneScoreMatrix")
+
+lsi = proj_retina@reducedDims$IterativeLSI@listData$matSVD
+
+# make annotation
+annotation = proj_retina$cellNames
+annotation = gsub("#.*","",annotation)
+
+# there are dup cells in the atac dataset, remove them
+dupid = duplicated( gsub("^.*#","",proj_retina$cellNames))
+
+##
+gene_act_matx = genescore_matrix_hub[!dupid,]
+lsi_49 = lsi[!dupid,-1]
+annotation = annotation[!dupid]
+table(annotation)
+```
+
+
+############# this part starts to prep rna #############
+Files are standard 10x format, also retreived from the same GEO location
+
+
+```{r}
+data_dir <- '/home/bkzhu/super_mario/atac_bench_nrz/retina/data/rna/'
+list.files(data_dir)
+expression_matrix <- Read10X(data.dir = data_dir)
+retina_rna_obj = CreateSeuratObject(counts = expression_matrix) # 51645 cells
+```
+
+```{r}
+rna_barcode = colnames(retina_rna_obj)
+rna_barcode = gsub("^.*_","",rna_barcode)
+atac_barcode = proj_retina$cellNames
+atac_barcode = gsub("^.*#","",atac_barcode)
+atac_barcode = atac_barcode[!dupid]
+
+matchid = match(atac_barcode, rna_barcode) #50008
+
+# rearrange rna
+retina_rna_obj_sort = retina_rna_obj[,matchid]
+```
+
+
+```{r}
+# make multiome dataset
+retina_multiome = CreateSeuratObject(counts = retina_rna_obj_sort@assays$RNA@counts, assay = "RNA")
+
+colnames(gene_act_matx) = genescore_names_hub
+rownames(gene_act_matx) = colnames(retina_multiome)
+temp = CreateAssayObject(counts = t(gene_act_matx))
+retina_multiome[["ATAC"]] = temp
+
+# put in extra information
+retina_multiome@meta.data$annotation = annotation
+lsitemp = lsi[!dupid,]
+rownames(lsitemp) = rownames(gene_act_matx)
+colnames(lsitemp) <- paste0("LSI_", 1:50)
+retina_multiome[["mds"]] <- CreateDimReducObject(embeddings = lsitemp, key = "LSI_", assay = DefaultAssay(retina_multiome))
+
+# save out
+saveRDS(retina_multiome, file = "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/retina_seurat.rds")
+```
+
+Save out rna counts, gene activity score and LSI
+
+```{r}
+library(Matrix)
+
+# rna related
+writeMM(t(retina_multiome@assays$RNA@counts), "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/rna.txt")
+write.csv(data.frame(names = rownames(retina_multiome@assays$RNA@counts)),
+          "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/rna_names.csv", row.names = F)
+
+# atac related
+writeMM(t(retina_multiome@assays$ATAC@counts), "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac.txt")
+write.csv(data.frame(names = rownames(retina_multiome@assays$ATAC@counts)),
+          "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac_names.csv", row.names = F)
+write.csv(lsi_49, "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/lsi_49.csv") # forgot to remove first one so note in downstream stuff
+
+# meta data
+write.csv(retina_multiome@meta.data, "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/meta.csv")
+```
+
+
+########## subsetting:
+#### subset 20k cells, reason: slt and ari f1 score calculation can not handle more than 20k + 20k cells
+## thus use 20k each for benchmarking in this case
+
+
+```{r}
+library(Matrix)
+
+rna = readMM("/home/bkzhu/super_mario/atac_bench_nrz/retina/data/rna.txt")
+atac = readMM("/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac.txt")
+lsi = read.csv("/home/bkzhu/super_mario/atac_bench_nrz/retina/data/lsi_49.csv")
+meta = read.csv("/home/bkzhu/super_mario/atac_bench_nrz/retina/data/meta.csv")
+
+set.seed(42)
+sub20k = sample(nrow(meta),20000)
+#table(meta[sub20k,"annotation"])
+writeMM(rna[sub20k,], "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/rna_20k.txt")
+writeMM(atac[sub20k,], "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/atac_20k.txt")
+write.csv(lsi[sub20k,],"/home/bkzhu/super_mario/atac_bench_nrz/retina/data/lsi_49_20k.csv", row.names = F)
+write.csv(meta[sub20k,],"/home/bkzhu/super_mario/atac_bench_nrz/retina/data/meta_20k.csv", row.names = F)
+```
+
+
+############## produce RNA and ATAC embedding for slt and ari calculation
+## ATAC embedding can just direclty use LSI scores; RNA use PCA embedding; both 15 dimensions
+
+```{r}
+## rna
+rna = readMM("/home/bkzhu/super_mario/atac_bench_nrz/retina/data/rna_20k.txt")
+rna = as.matrix(rna)
+rna_names = read.csv('/home/bkzhu/super_mario/atac_bench_nrz/retina/data/rna_names.csv')
+colnames(rna) = rna_names$names
+rownames(rna) = paste0("cell",c(1:nrow(rna)))
+
+library(Seurat)
+temp_obj1 = CreateSeuratObject(counts=t(rna),assay="rna")
+temp_obj1 = SetAssayData(object = temp_obj1, slot = "data", new.data = t(rna), assay="rna") # input data already sctnorm
+temp_obj1 = ScaleData(temp_obj1)
+temp_obj1 <- FindVariableFeatures(temp_obj1, selection.method = "vst", nfeatures = 2000)
+temp_obj1 = RunPCA(temp_obj1, features = rownames(temp_obj1))
+meta = read.csv("/home/bkzhu/super_mario/atac_bench_nrz/retina/data/meta_20k.csv")
+pca = as.data.frame(temp_obj1@reductions$pca@cell.embeddings[,c(1:15)])
+pca$label = meta$annotation
+write.csv(pca, "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/orig_x.csv", row.names = F)
+
+# lsi
+lsi = read.csv("/home/bkzhu/super_mario/atac_bench_nrz/retina/data/lsi_49_20k.csv")
+lsi_orig = lsi[,c(2:16)]
+lsi_orig$label = meta$annotation
+write.csv(lsi_orig, "/home/bkzhu/super_mario/atac_bench_nrz/retina/data/orig_y.csv", row.names = F)
+```
+

@@ -1,0 +1,111 @@
+---
+title: "prep_cortical"
+output: html_document
+---
+
+code to human cerebral cortical (scATAC/scRNA multiome dataset from https://pubmed.ncbi.nlm.nih.gov/34390642/ by greenleaf lab):
+rna information from "Writeup14n_10x_greenleaf.RData"
+atac information from "Writeup14n_10x_greenleaf.RData" # gene activity score pre calculated by signac already avaliable in the seurat object
+
+@Nancy Zhang and @Sijia Huang for source of this file.
+
+This processing code written by Zongming Ma
+
+```{r}
+load("Writeup14n_10x_greenleaf.RData")
+
+dat1=t(greenleaf@assays$SCT@data)
+dat2=t(greenleaf@assays$geneActivity@data)
+names1= colnames(dat1)
+names2= colnames(dat2)
+
+temp= strsplit(names2, split="ATAC-")
+temp=unlist(temp)
+temp=temp[seq(2,length(temp),2)]
+names2=temp
+
+sum(names1 %in% names2)
+sum(names2 %in% names1)
+
+# make sure column names match
+mm = match(names1, names2)
+dat1=dat1[,!is.na(mm)]
+dat2=dat2[,mm[!is.na(mm)]]
+
+dat0=t(greenleaf@assays$RNA@data)
+names0 = colnames(dat0)
+names1 = colnames(dat1)
+sum(names0 %in% names1)
+sum(names1 %in% names0)
+mm0 = match(names1, names0)
+dat0=dat0[,mm0[!is.na(mm0)]]
+
+dim(dat0)
+# dim(dat1)
+dim(dat2)
+# make sure row names match
+# rnacells=rownames(dat1)
+rnacells=rownames(dat0)
+ataccells=rownames(dat2)
+plot(match(rnacells, ataccells))
+
+# write out data matrices in sparse matrix form.
+write.table(greenleaf@meta.data, file="greenleaf_cortical_meta.csv", sep=",", col.names=TRUE, row.names=FALSE)
+# write out names of genes for RNA.
+rna_names = as.data.frame(colnames(dat1))
+colnames(rna_names)="names"
+write.table(rna_names, file="greenleaf_cortical_rna_names.csv", sep=",", col.names=TRUE, row.names=TRUE)
+
+# write out the sparse matrices.
+writeMM(dat0, "greenleaf_cortical_RNAcount_data.mtx")
+writeMM(dat1, "greenleaf_cortical_SCT_data.mtx")
+writeMM(dat2, "greenleaf_cortical_GENEACTIVITY_data.mtx")
+
+# calculate additional LSI scores
+DefaultAssay(greenleaf) <- "ATAC"
+greenleaf <- RunTFIDF(greenleaf)
+greenleaf <- FindTopFeatures(greenleaf, min.cutoff = 'q0')
+greenleaf <- RunSVD(greenleaf, n = 200)
+
+dat3 = greenleaf@reductions$lsi@cell.embeddings
+dim(dat3)
+peakcells = rownames(dat3)
+plot(match(rnacells, peakcells)) # make sure row names match.
+write.table(dat3[,-1], file="greenleaf_cortical_peak_lsi.csv", sep=",", col.names=TRUE, row.names=TRUE)
+```
+
+
+############## produce RNA and ATAC embedding for slt and ari calculation
+## ATAC embedding can just direclty use LSI scores; RNA use PCA embedding; both 15 dimensions
+
+```{r}
+## rna
+rna = readMM("/home/bkzhu/super_mario/atac_bench_nrz/greanleaf_cortical/data/greenleaf_cortical_RNAcount_data.mtx")
+rna = as.matrix(rna)
+rna_names = read.csv('/home/bkzhu/super_mario/atac_bench_nrz/greanleaf_cortical/data/greenleaf_cortical_rna_names.csv')
+colnames(rna) = rna_names$names
+rownames(rna) = paste0("cell",c(1:nrow(rna)))
+
+library(Seurat)
+temp_obj1 = CreateSeuratObject(counts=t(rna),assay="rna")
+temp_obj1 = SetAssayData(object = temp_obj1, slot = "data", new.data = t(rna), assay="rna") # input data already sctnorm
+temp_obj1 = ScaleData(temp_obj1)
+temp_obj1 <- FindVariableFeatures(temp_obj1, selection.method = "vst", nfeatures = 2000)
+temp_obj1 = RunPCA(temp_obj1, features = rownames(temp_obj1))
+meta = read.csv("/home/bkzhu/super_mario/atac_bench_nrz/greanleaf_cortical/data/greenleaf_cortical_meta.csv")
+pca = as.data.frame(temp_obj1@reductions$pca@cell.embeddings[,c(1:15)])
+pca$label = meta$annotation
+write.csv(pca, "/home/bkzhu/super_mario/atac_bench_nrz/greanleaf_cortical/data/orig_x.csv", row.names = F)
+
+# lsi
+lsi = read.csv("/home/bkzhu/super_mario/atac_bench_nrz/greanleaf_cortical/data/greenleaf_cortical_peak_lsi.csv")
+lsi_orig = lsi[,c(1:15)]
+lsi_orig$label = meta$annotation
+write.csv(lsi_orig, "/home/bkzhu/super_mario/atac_bench_nrz/greanleaf_cortical/data/orig_y.csv", row.names = F)
+```
+
+
+
+
+
+

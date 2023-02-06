@@ -1,0 +1,66 @@
+---
+title: "plot_tonsil_met"
+output: html_document
+---
+
+Script to produce metrics related to the batched data ( 10k 30k, 5 batches in total).
+
+
+```{r}
+library(ggplot2)
+metrics = read.csv("tonsil_v2/match/bench_out/batch_metrics_resultV2.csv")
+metrics$method <- factor(metrics$method,levels = c("mf", "sr", "lg", "hm","bsc"))
+colorv = c("#f6511d","#ffb400","#00a6ed","#7fb800","#A149FA")
+```
+
+
+```{r}
+library(dplyr)
+# Data
+data <- metrics %>% select(method, ann1) 
+#data$foscttm = 1 - data$foscttm
+# Calculates mean, sd, se and IC
+my_sum <- data %>%
+  group_by(method) %>%
+  dplyr::summarise( 
+    n=n(),
+    mean=mean(ann1),
+    sd=sd(ann1)
+  ) %>%
+  mutate( se=sd/sqrt(n))  %>%
+  mutate( ic=se * qt((1-0.05)/2 + .5, n-1))
+ 
+# Standard deviation
+
+
+### this is batched matching accuracy
+p = ggplot() +
+  geom_bar(data=my_sum, aes(x=method, y=mean, fill=method), stat="identity", alpha=0.7, width = 0.4) +
+  geom_errorbar(data=my_sum, aes(x=method, ymin=mean-sd, ymax=mean+sd), width=0.08, colour="black", alpha=0.9, size=0.2) +
+  ggtitle("using standard deviation") + theme_minimal()  + scale_fill_manual(values = colorv) + coord_cartesian(ylim=c(0.25,0.97)) +
+  geom_point(data=data, aes(y=ann1, x=method, fill=method),alpha=0.5, size=0.5)
+#ggsave("tonsil_v2/plots/batch_ann.svg", height = 3, width = 4.5)
+p
+```
+
+```{r}
+# slt and ari f1
+
+p = ggplot(metrics) + geom_point(aes(x = slt_f1, y = ari_f1, color = method), size =2, alpha = 0.5) +
+  theme_minimal() + scale_color_manual(values = colorv) +
+  ylim(c(0.35,0.62)) + xlim(c(0.35,0.55))
+#ggsave("tonsil_v2/plots/slt_ari.svg", height = 3, width = 4.5)
+p
+```
+
+```{r}
+# closed up version
+p = ggplot(metrics) + geom_point(aes(x = slt_f1, y = ari_f1, color = method), size =2, alpha = 0.5) +
+  theme_minimal() + scale_color_manual(values = colorv) +
+  ylim(c(0.56,0.62)) + xlim(c(0.51,0.55))
+ggsave("tonsil_v2/plots/slt_ari_small.svg", height = 3, width = 4.5)
+p
+```
+
+
+

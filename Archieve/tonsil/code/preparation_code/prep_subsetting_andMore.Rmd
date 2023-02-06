@@ -1,0 +1,75 @@
+---
+title: "subset"
+output: html_document
+---
+
+Script to prepare data (subsetting etc) for different benchmarking tests, related to codex -rna -tonsil scenario
+
+################### first: cells used to benchmark matching accu, slt and ari F1 scores ##########################
+Since for this task we can not include too many cells (slt and ari can not run on > 40k cells due to cpu limitation)
+so we subsampled 10k scrnaseq cells and 30k codex cells to be used in this benchmarking process, and there are 5 batches intotal
+
+```{r}
+# script to produce test batches
+# for codex rna matching
+library(Matrix)
+library(Seurat)
+
+rna_full = readMM("/tonsil_v2/RNA/tonsil_rna_0510.txt")
+protei_full = read.csv("/tonsil_v2/Codex/FCS_output_DeepCell_extOnly/formatch_clusters_x28_y715_wstepV2.csv")
+meta_full = read.csv("/tonsil_v2/RNA/tonsil_rna_0510_meta.csv")
+root = "/tonsil_v2/match/bench_input/"
+batch = 5
+
+c2u = colnames(protei_full)[6:51] # just protein columns
+for (i in c(1:5)){ # locked in case miss press
+  batch_name = paste0("b",as.character(i),"/")
+  out_dir =paste0(root,batch_name)
+  dir.create(out_dir)
+  # create files
+  set.seed(i)
+  randix1 = sample(dim(rna_full)[1], 10000) # every batch test 10k cells
+  randix2 = sample(dim(protei_full)[1], 30000) # every batch test 30k cells
+  
+  rna = rna_full[randix1,]
+  pro = protei_full[randix2,c2u]
+  meta1 = meta_full[randix1,] # rna meta
+  meta2 = protei_full[randix2,c(2:5,52:57)] # pro meta info
+  
+  write.csv(meta1, paste0(out_dir,"meta_rna.csv"),row.names = FALSE)
+  write.csv(meta2, paste0(out_dir,"meta_pro.csv"),row.names = FALSE)
+  write.csv(pro, paste0(out_dir,"pro.csv"),row.names = FALSE)
+  writeMM(rna, paste0(out_dir,"rna.txt"))
+  # create pca reduction orgin files
+  rna_names = read.csv('/tonsil_v2/RNA/tonsil_rna_0510_names.csv')
+  colnames(rna) = rna_names$names
+  rownames(rna) = as.character(c(1:nrow(rna)))
+  # pro
+  rownames(pro) = as.character(c(1:nrow(pro)))
+  # meta
+  # use seurat as standard to produce reduction
+  x_obj=CreateSeuratObject(counts=t(rna),assay="x")
+  x_obj <- NormalizeData(x_obj)
+  x_obj <- FindVariableFeatures(x_obj, selection.method = "vst", nfeatures = 3000)
+  x_obj <- ScaleData(x_obj, features = rownames(x_obj))
+  x_obj <- RunPCA(x_obj, features = VariableFeatures(object = x_obj)) 
+  pca_rna = as.data.frame(x_obj@reductions$pca@cell.embeddings[,c(1:15)])
+  pca_rna$label = meta1$cluster.info 
+  write.csv(pca_rna, paste0(out_dir,"orig_x.csv"), row.names=FALSE)
+  
+  # produce adt reduction
+  y_obj=CreateSeuratObject(counts=t(pro),assay="y")
+  y_obj <- NormalizeData(y_obj)
+  y_obj <- ScaleData(y_obj, features = rownames(y_obj))
+  y_obj <- RunPCA(y_obj, features = rownames(y_obj)) 
+  pca_pro = as.data.frame(y_obj@reductions$pca@cell.embeddings[,c(1:15)])
+  pca_pro$label = meta2$cluster.term #### could change if we want different labels
+  write.csv(pca_pro, paste0(out_dir,"orig_y.csv"), row.names=FALSE)
+  
+}
+```
+
+
+############### the second case for full analysis, all the cells in the codex tonsil subregion and all the rna cells were used ############
+in this case we just use the original dataset, this cells were used for all methods to do GC related analysis + confusion matrix plotting
+

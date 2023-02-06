@@ -1,0 +1,126 @@
+---
+title: "codex_tonsil"
+output: html_document
+---
+
+data prep script of codex tonsil data
+source of the data:  https://onlinelibrary.wiley.com/doi/10.1002/eji.202048891
+also described in: https://www.sciencedirect.com/science/article/abs/pii/S240547122100380X
+tissue used (tonsil1 (as labeld in cell system paper) ID: tonsil9338 from Graham L. Barlow data transfer)
+
+The processed single FOV mutli-channel tiffs (processed by internal codex servers) were directly transfered from nolan lab server.
+The images then went through standard processing pipeline: whole cell segmentation (by mesmer with local implementation), signal extraction, signal compensation (with REDSEA), and that produces fcs files for each fov. These code were not supplied here since they are part of standard processing pipeline. 
+Please contact Bokai Zhu if raw images from the original study, or processing code related to steps described above is needed.
+
+
+For this study, we start with single cell codex data extracted in form of fcs files from REDSEA code: (tonsil 1)
+
+```{r}
+path = "/home/bkzhu/super_mario/tonsil_v2/Codex/FCS_output_DeepCell_extOnly/"
+folders = list.files(path = path)
+container = list()
+i = 1
+for (f in folders){
+  fcs1=read.flowSet(paste0(path,f,'/WholeCell_REDSEA_RC=1/dataScaleSizeFCS.fcs'))
+  expr1 = as.data.frame(fsApply(fcs1, exprs))
+  expr1$PointNum = f
+  container[[i]] = expr1
+  i = i+1
+}
+
+library(dplyr)
+exp_all = bind_rows(container, .id = "column_label") # 375,985
+unique(exp_all$PointNum)
+```
+
+```{r}
+t2u = c("cellLabelInImage","cellSize","HOECHST1","CD38","CD19","CD31","Vimentin","CD22","Ki67","CD8","CD90",
+        "CD123","CD15","CD3","CD152","CD21","cytokeratin","CD2","CD66","collagen IV","CD81","HLA-DR",
+        "CD57","CD4","CD7","CD278","podoplanin","CD45RA","CD34","CD54","CD9","IGM","CD117","CD56","CD279",
+        "CD45","CD49f","CD5","CD16","CD63","CD11b","CD1c","CD40","CD274","CD27",
+        "CD104","CD273","FAPalpha","Ecadherin","PointNum")
+exp_all_s = exp_all[,t2u]
+
+# with visual check roughly size should be around 30 - 800 pixels, fitler by cell size
+exp_all_c = subset(exp_all_s, exp_all_s$cellSize>30 & exp_all_s$cellSize<800) # 371,085
+```
+
+```{r}
+library(DelayedMatrixStats)
+library(dplyr)
+library(reshape)
+library(ggplot2)
+
+
+## here we do quantile norm to 0-1
+expr1 = as.matrix(exp_all_c[,c(4:49)])
+rng = colQuantiles(expr1, probs = c(0.05,0.95)) 
+a = sweep(expr1, 2,rng[,1], "-")
+b = rng[,2]-rng[,1]
+c = sweep(a, 2, b, "/")
+c[c>1]=1
+c[c<0]=0
+exp_all_c[,c(4:49)] = c # only the protein markers
+
+```
+
+Then we do a quick manual annotation of cell types:
+
+```{r}
+library(Seurat)
+test = exp_all_c
+
+temp_obj_ts <- CreateSeuratObject(counts = t(test[,c(4:49)]))
+SetAssayData(object = temp_obj_ts, slot = "data", new.data = t(test[,c(4:49)])) # dont need to do addtional norm steps
+temp_obj_ts <- SetAssayData(object = temp_obj_ts, slot = "scale.data", new.data = t(test[,c(4:49)]))
+temp_obj_ts <- RunPCA(temp_obj_ts, features = colnames(test[,c(4:49)]))
+ElbowPlot(temp_obj_ts)
+temp_obj_ts <- RunUMAP(temp_obj_ts, dims = 1:15)
+temp_obj_ts = FindNeighbors(temp_obj_ts , dims = 1:15)
+temp_obj_ts = FindClusters(temp_obj_ts, resolution = 1)
+
+temp_obj_ts_sub = subset(temp_obj_ts, downsample = 1000)
+DimPlot(temp_obj_ts_sub, label = T)
+```
+
+```{r}
+seurat_labels = Idents(temp_obj_ts)
+# manual annotation
+new.cluster.ids <- c("B-CD22-CD40","CD4 T","CD8 T","CD4 T","B-CD22-CD40","B-Ki67","B-Ki67",
+                     "B-CD22-CD40","B-CD22-CD40","Fibro/Epi","Plasma","Other","Other","mix","Vessel",
+                     "Fibro/Epi","Other","Bg","Fibro/Epi","Other","DC","Fibro/Epi","mix",
+                     "Bg","mix","mix","Bg")
+names(new.cluster.ids) <- levels(temp_obj_ts)
+temp_obj_ts <- RenameIdents(temp_obj_ts, new.cluster.ids)
+table(Idents(temp_obj_ts))
+
+# remove the unwanted dirty cell, unannotated cells, and vessel cells that should not be included to mathc against rna cells
+`%notin%` <- Negate(`%in%`)
+exp_all_c_sub = subset(exp_all_c,exp_all_c$cluster.term %notin% c("mix","Vessel","Other","Bg")) #301,655
+
+```
+
+We dont need to run the whole tissue with 300k cells, instead we will just crop out roughly 7x8 FOV with ~ 150k cells
+we want x 2 - 8 ; y 7 - 15:
+
+```{r}
+library(stringr)
+
+fovs = c(as.character(unique(exp_all_c_sub$PointNum)))
+list_fov = c()
+
+for (i in c(2:8)){
+  for (j in c(7:15)){
+    x1 = str_sub(paste0("0",as.character(i)),-2,-1)
+    y1 = str_sub(paste0("0",as.character(j)),-2,-1)
+    target_xy = paste0('X',x1,'_','Y',y1)
+    list_fov = c(list_fov, fovs[grep(target_xy,fovs)])
+  }
+}
+list_fov
+exp_all_c_sub_x28_y715 = subset(exp_all_c_sub, exp_all_c_sub$PointNum %in% list_fov)
+# and save out
+write.csv(exp_all_c_sub_x28_y715,"tonsil_v2/Codex/FCS_output_DeepCell_extOnly/formatch_clusters_x28_y715V2.csv")
+```
+
+

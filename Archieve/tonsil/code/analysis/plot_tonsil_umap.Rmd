@@ -1,0 +1,227 @@
+---
+title: "plot_embed"
+output: html_document
+---
+
+Script to produce umap visualization for each methods embedding results
+
+Umap already calcualted in the previous python code.
+
+first plot maxfuse
+
+```{r}
+library(ggplot2)
+library(ggsci)
+# this version no rna filtering
+# label version
+input1 = read.csv("tonsil_v2/Codex/FCS_output_DeepCell_extOnly/formatch_clusters_x28_y715_wstepV2.csv")
+input2 = read.csv("tonsil_v2/RNA/tonsil_rna_0510_meta.csv")
+
+embedd = read.csv("tonsil_v2/match/match_output/full/mf/allrna_vanilla_umap_cca10.csv")
+matchid = read.csv("tonsil_v2/match/match_output/1205_tonsil_fullID.csv") 
+
+# dims
+nrna = dim(input2)[1]
+
+set.seed(42)
+cdxcells = embedd[c((nrna+1):nrow(embedd)),]
+cdxmeta = input1[matchid$idx2+1,]
+# for visual subsample cdx cells
+subsample = 20000
+ridx1 = sample(nrow(cdxcells), subsample) ## note subsampled
+
+# get embdding for ploting
+embed_plt_df = rbind(embedd[c(1:nrna),], cdxcells[ridx1,])
+label1 = c(rep("rna", nrna), rep("cdx", subsample))
+label2 = c(as.character(input2$cluster.info), as.character(cdxmeta$cluster.term[ridx1]))
+
+p = ggplot(embed_plt_df) +
+  geom_point(aes(x=umap1, y=umap2, color=label1,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  theme_classic() + scale_color_manual(values = c("#fe4c4a", "#435571"))
+#ggsave("tonsil_v2/plots/mf_umap_mod_1101.png",p, height = 7, width = 7.5)
+ggsave("tonsil_v2/plots/mf_umap_mod_1205.png",p, height = 7, width = 7.5)
+p
+```
+
+
+```{r}
+p1 = ggplot(embed_plt_df)  + 
+  geom_point(aes(x=umap1, y=umap2, color=label2,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "umap 1", y = "umap 2") + theme_classic() + ggtitle("mf") +
+  scale_color_npg()
+ggsave("tonsil_v2/plots/mf_umap_cell_1205.png",p1,height = 6, width = 7.8)
+p1
+```
+
+
+bindsc
+
+
+```{r}
+embedd = read.csv("tonsil_v2/match/match_output/full/bsc_inpg/umap.csv")
+matchid = read.csv("tonsil_v2/match/match_output/bsc_match_id_y2x_p1p2_filt03.csv") 
+  
+# dims
+nrna = dim(input2)[1]
+
+set.seed(42)
+cdxcells = embedd[c((nrna+1):nrow(embedd)),]
+cdxmeta = input1[matchid$id1+1,] # named different NOTE
+# for visual subsample cdx cells
+subsample = 20000
+ridx1 = sample(nrow(cdxcells), subsample) ## note subsampled
+
+# get embdding for ploting
+embed_plt_df = rbind(embedd[c(1:nrna),], cdxcells[ridx1,])
+label1 = c(rep("rna", nrna), rep("cdx", subsample))
+label2 = c(as.character(input2$cluster.info), as.character(cdxmeta$cluster.term[ridx1]))
+
+p = ggplot(embed_plt_df) +
+  geom_point(aes(x=umap1, y=umap2, color=label1,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  theme_classic() + scale_color_manual(values = c("#fe4c4a", "#435571"))
+ggsave("tonsil_v2/plots/bsc_umap_mod_1101.png",p, height = 7, width = 7.5)
+p
+
+```
+
+```{r}
+p1 = ggplot(embed_plt_df)  + 
+  geom_point(aes(x=umap1, y=umap2, color=label2, size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "umap 1", y = "umap 2") + theme_classic() + ggtitle("bsc") +
+  scale_color_npg()
+ggsave("tonsil_v2/plots/bsc_umap_cell_1101.png",p1,height = 6, width = 7.8)
+p1
+```
+
+
+seurat
+
+
+```{r}
+embedd = read.csv("tonsil_v2/match/match_output/full/sr/umap.csv")
+matchid = read.csv("tonsil_v2/match/match_output/full/sr/sr_match_id_y2x_filt03.csv") 
+  
+# dims
+nrna = dim(input2)[1]
+
+set.seed(42)
+cdxcells = embedd[c((nrna+1):nrow(embedd)),]
+cdxmeta = input1[matchid$id1+1,] # named different NOTE
+# for visual subsample cdx cells
+subsample = 20000
+ridx1 = sample(nrow(cdxcells), subsample) ## note subsampled
+
+# get embdding for ploting
+embed_plt_df = rbind(embedd[c(1:nrna),], cdxcells[ridx1,])
+label1 = c(rep("rna", nrna), rep("cdx", subsample))
+label2 = c(as.character(input2$cluster.info), as.character(cdxmeta$cluster.term[ridx1]))
+
+p = ggplot(embed_plt_df) +
+  geom_point(aes(x=umap1, y=umap2, color=label1,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  theme_classic() + scale_color_manual(values = c("#fe4c4a", "#435571"))
+ggsave("tonsil_v2/plots/sr_umap_mod_1101.png",p, height = 7, width = 7.5)
+p
+
+```
+
+
+```{r}
+p1 = ggplot(embed_plt_df)  + 
+  geom_point(aes(x=umap1, y=umap2, color=label2, size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "umap 1", y = "umap 2") + theme_classic() + ggtitle("sr") +
+  scale_color_npg()
+ggsave("tonsil_v2/plots/sr_umap_cell_1101.png",p1,height = 6, width = 7.8)
+p1
+```
+
+
+harmony
+
+
+```{r}
+embedd = read.csv("tonsil_v2/match/match_output/full/hm/umap.csv")
+matchid = read.csv("tonsil_v2/match/match_output/full/hm/hm_match_id_y2x_filt03.csv") 
+  
+# dims
+nrna = dim(input2)[1]
+
+set.seed(42)
+cdxcells = embedd[c((nrna+1):nrow(embedd)),]
+cdxmeta = input1[matchid$id1+1,] # named different NOTE
+# for visual subsample cdx cells
+subsample = 20000
+ridx1 = sample(nrow(cdxcells), subsample) ## note subsampled
+
+# get embdding for ploting
+embed_plt_df = rbind(embedd[c(1:nrna),], cdxcells[ridx1,])
+label1 = c(rep("rna", nrna), rep("cdx", subsample))
+label2 = c(as.character(input2$cluster.info), as.character(cdxmeta$cluster.term[ridx1]))
+
+p = ggplot(embed_plt_df) +
+  geom_point(aes(x=umap1, y=umap2, color=label1,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  theme_classic() + scale_color_manual(values = c("#fe4c4a", "#435571"))
+ggsave("tonsil_v2/plots/hm_umap_mod_1101.png",p, height = 7, width = 7.5)
+p
+
+```
+
+
+```{r}
+p1 = ggplot(embed_plt_df)  + 
+  geom_point(aes(x=umap1, y=umap2, color=label2, size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "umap 1", y = "umap 2") + theme_classic() + ggtitle("hm") +
+  scale_color_npg()
+ggsave("tonsil_v2/plots/hm_umap_cell_1101.png",p1,height = 6, width = 7.8)
+p1
+```
+
+
+liger
+
+
+```{r}
+embedd = read.csv("tonsil_v2/match/match_output/full/lg/umap.csv")
+matchid = read.csv("tonsil_v2/match/match_output/full/lg/lg_match_id_y2x_filt03.csv") 
+
+# filtered out:
+lgx_fid = read.csv("tonsil_v2/match/match_output/full/lg/d1_id.csv")
+lgy_fid = read.csv("tonsil_v2/match/match_output/full/lg/d2_id.csv")
+
+# get filterd input1 and input2
+input1_filt = input1[-c(lgy_fid$id),]
+input2_filt = input2[-c(lgx_fid$id),]
+
+# dims
+nrna = dim(input2_filt)[1]
+
+set.seed(42)
+cdxcells = embedd[c((nrna+1):nrow(embedd)),]
+cdxmeta = input1_filt[matchid$id1+1,] # named different NOTE
+# for visual subsample cdx cells
+subsample = 20000
+ridx1 = sample(nrow(cdxcells), subsample) ## note subsampled
+
+# get embdding for ploting
+embed_plt_df = rbind(embedd[c(1:nrna),], cdxcells[ridx1,])
+label1 = c(rep("rna", nrna), rep("cdx", subsample))
+label2 = c(as.character(input2_filt$cluster.info), as.character(cdxmeta$cluster.term[ridx1]))
+
+p = ggplot(embed_plt_df) +
+  geom_point(aes(x=umap1, y=umap2, color=label1,size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  theme_classic() + scale_color_manual(values = c("#fe4c4a", "#435571"))
+ggsave("tonsil_v2/plots/lgvan_umap_mod_1101.png",p, height = 7, width = 7.5)
+p
+
+```
+
+
+```{r}
+p1 = ggplot(embed_plt_df)  + 
+  geom_point(aes(x=umap1, y=umap2, color=label2, size = 3,stroke = 0, alpha =0.001), cex = 1) +
+  labs( x = "umap 1", y = "umap 2") + theme_classic() + ggtitle("lg") +
+  scale_color_npg()
+ggsave("tonsil_v2/plots/lgvan_umap_cell_1101.png",p1,height = 6, width = 7.8)
+p1
+```
+
+

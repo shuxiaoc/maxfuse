@@ -1,0 +1,120 @@
+---
+title: "data-prep"
+output: html_document
+---
+
+Read the bmc cite-seq dataset (25 antibody), data retrieved from Hao et al. 2022
+
+
+```{r}
+library(SeuratData)
+InstallData("bmcite")
+bm <- LoadData(ds = "bmcite")
+# only look at raw counts
+bm.cite=bm@assays$ADT@counts
+rownames(bm.cite)[25]="HLA-DR" 
+bm.cite = as.data.frame(t(bm.cite))
+# only look at raw counts
+bm.rna=bm@assays$RNA@counts
+bm.rna = t(bm.rna)
+
+# labels
+bm.cluster2=bm@meta.data$celltype.l2
+bm.cluster1=bm@meta.data$celltype.l1
+
+# for benchmark bined cell clusters
+bm.cluster2=as.character(bm.cluster2)
+bm.cluster2[bm.cluster2 =="pDC"] <- "DC" 
+bm.cluster2[bm.cluster2 =="Prog_RBC"] <- "Progenitor"
+bm.cluster2[bm.cluster2 =="gdT"] <- "otherT"
+bm.cluster2[bm.cluster2 =="CD4 Naive"] <- "CD4 T" 
+bm.cluster2[bm.cluster2 =="CD4 Memory"] <- "CD4 T" 
+bm.cluster2[bm.cluster2 =="CD14 Mono"] <- "monocyte" 
+bm.cluster2[bm.cluster2 =="Naive B"] <- "B" 
+bm.cluster2[bm.cluster2 =="CD8 Naive"] <- "CD8 T" 
+bm.cluster2[bm.cluster2 =="CD8 Effector_2"] <- "CD8 T" 
+bm.cluster2[bm.cluster2 =="GMP"] <- "Progenitor"
+bm.cluster2[bm.cluster2 =="CD8 Effector_1"] <- "CD8 T"
+bm.cluster2[bm.cluster2 =="CD16 Mono"] <- "monocyte" 
+bm.cluster2[bm.cluster2 =="CD8 Memory_1"] <- "CD8 T"
+bm.cluster2[bm.cluster2 =="MAIT"] <- "otherT" 
+bm.cluster2[bm.cluster2 =="Memory B"] <- "B"
+bm.cluster2[bm.cluster2 =="cDC2"] <- "DC"
+bm.cluster2[bm.cluster2 =="CD56 bright NK"] <- "NK"
+bm.cluster2[bm.cluster2 =="Treg"] <- "otherT"
+bm.cluster2[bm.cluster2 =="Prog_B 2"] <- "Progenitor" 
+bm.cluster2[bm.cluster2 =="Prog_Mk"] <- "Progenitor" 
+bm.cluster2[bm.cluster2 =="CD8 Memory_2"] <- "CD8 T" 
+bm.cluster2[bm.cluster2 =="Plasmablast"] <- "B" 
+bm.cluster2[bm.cluster2 =="HSC"] <- "Progenitor" 
+bm.cluster2[bm.cluster2 =="LMPP"] <- "Progenitor" 
+bm.cluster2[bm.cluster2 =="Prog_DC"] <- "Progenitor"
+bm.cluster2[bm.cluster2 =="Prog_B 1"] <- "Progenitor"
+
+```
+
+
+for benchmarking and analysis, only 20k randomly sampled used
+
+```{r}
+# try 20k since some metrics can't calculate such large metrics
+bm.rna.matrix = as.matrix(bm.rna)
+set.seed(42)
+randidx = sample(dim(bm.rna.matrix)[1],20000)
+bm.rna.sub = bm.rna[randidx,]
+bm.cite.sub = bm.cite[randidx,]
+mm = bm@meta.data[randidx,]
+mm$name = rownames(mm)
+
+library(Matrix)
+writeMM(bm.rna.sub, "/bench_test4/input/rna200.txt")
+write.csv(bm.cite.sub, "/bench_test4/input/pro200.csv")
+bmc_labele = data.frame(name = rownames(mm) ,lv1 = mm$celltype.l1,
+                        lv2 = mm$celltype.l2, lv2_bk = bm.cluster2[randidx])
+write.csv(bmc_labele, "/bench_test4/input/meta200.csv")
+
+# also need to save feature names for rna
+bmc_rnaifno = data.frame(names = colnames(bm.rna.sub))
+write.csv(bmc_rnaifno, "/bench_test4/input/rna_names.csv")
+```
+
+produce pca reduction used for slt and ari f1 scores
+
+```{r}
+# script to make the orig embedding for benchmarking
+# intended input for non-matching related metrices
+# citeseq pbmc 200 versio
+library(Matrix)
+library(Seurat)
+# rna
+rna = readMM("/bench_test4/input/rna200.txt")
+rna_names = read.csv('/bench_test4/input/rna_names.csv')
+colnames(rna) = rna_names$names
+rownames(rna) = as.character(c(1:nrow(rna)))
+# pro
+protein = read.csv("/bench_test4/input/pro200.csv")
+protein = protein[,-1]# remove the row index
+rownames(protein) = as.character(c(1:nrow(protein)))
+# meta
+meta = read.csv("/bench_test4/input/meta200.csv")
+
+# use seurat as standard to produce reduction
+x_obj=CreateSeuratObject(counts=t(rna),assay="x")
+x_obj <- NormalizeData(x_obj)
+x_obj <- FindVariableFeatures(x_obj, selection.method = "vst", nfeatures = 3000)
+x_obj <- ScaleData(x_obj, features = rownames(x_obj))
+x_obj <- RunPCA(x_obj, features = VariableFeatures(object = x_obj)) #quick check elbow 10 is more then enough
+pca_rna = as.data.frame(x_obj@reductions$pca@cell.embeddings[,c(1:15)])
+pca_rna$label = meta$lv2_bk #using lv1.5
+write.csv(pca_rna, "/bench_test4/input/orig_x.csv", row.names=FALSE)
+
+# produce adt reduction
+y_obj=CreateSeuratObject(counts=t(protein),assay="y")
+y_obj <- NormalizeData(y_obj)
+y_obj <- ScaleData(y_obj, features = rownames(y_obj))
+y_obj <- RunPCA(y_obj, features = rownames(y_obj)) #quick check elbow 10 is more then enough
+pca_pro = as.data.frame(y_obj@reductions$pca@cell.embeddings[,c(1:15)])
+pca_pro$label = meta$lv2_bk #### could change if we want different labels
+write.csv(pca_pro, "/bench_test4/input/orig_y.csv", row.names=FALSE)
+
+```

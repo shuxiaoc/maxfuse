@@ -1,0 +1,221 @@
+---
+title: "asap_dataprep"
+output: html_document
+---
+
+asap prepping of the https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4732109
+(CD28 CD3 stim pbmc control group)
+
+```{r}
+adt = read.table("/home/bkzhu/super_mario/asap/files/GSM4732110_CD28_CD3_control_ASAP_ADT.tsv", header = TRUE)
+# 300k cells
+# there are more protein cells than atac cells. only take protein cells that are multiome
+# done later on
+```
+
+
+#### directly process the fragment files (downloaded from the same geo depo location)
+#### we process the fragment files by Archr
+
+
+```{r}
+# try to output a genescrore matrix from the archr
+library(ArchR)
+path1 = "/asap/files/GSM4732109_CD28_CD3_control_ASAP_fragments.tsv.gz"
+addArchRGenome("hg38")
+paths = c(path1)
+names(paths) = c("pbmc")
+
+ArrowFiles_asap_2 <- ArchR::createArrowFiles(
+  inputFiles = paths,
+  sampleNames = names(paths),
+  filterTSS = 4, #Dont set this too high because you can always increase later
+  filterFrags = 1000, 
+  addTileMat = TRUE,
+  minFrags = 500,
+  maxFrags = 1e+05,
+  addGeneScoreMat = TRUE,
+  nChunk = 5,
+  threads = 16,
+  cleanTmp = TRUE
+)
+
+doubScores <- ArchR::addDoubletScores(
+  input = ArrowFiles_asap_2,
+  k = 10, #Refers to how many cells near a "pseudo-doublet" to count.
+  knnMethod = "UMAP", #Refers to the embedding to use for nearest neighbor search.
+  LSIMethod = 1
+)
+
+# fast
+proj_asap2 <- ArchRProject(
+  ArrowFiles = ArrowFiles_asap_2, 
+  outputDirectory = "asap_archr",
+  copyArrows = TRUE #This is recommened so that you maintain an unaltered copy for later usage.
+)
+
+cell_name_atac = gsub("pbmc#","",proj_asap2$cellNames)
+sum(cell_name_atac %in% adt$barcode)
+
+
+proj_asap2 <- addIterativeLSI(
+    ArchRProj = proj_asap2,
+    useMatrix = "TileMatrix", 
+    name = "IterativeLSI", 
+    iterations = 2, 
+    clusterParams = list( #See Seurat::FindClusters
+        resolution = c(0.2), 
+        sampleCells = 10000, 
+        n.start = 10
+    ), 
+    varFeatures = 25000, 
+    dimsToUse = 1:50
+)
+
+proj_asap2 <- addUMAP(
+    ArchRProj = proj_asap2, 
+    reducedDims = "IterativeLSI", 
+    name = "UMAP", 
+    nNeighbors = 30, 
+    minDist = 0.5, 
+    metric = "cosine"
+)
+
+#### calculate the gene activity scores from the atac fragment files
+
+genescore_asap2 = getMatrixFromProject(
+  ArchRProj = proj_asap2,
+  useMatrix = "GeneScoreMatrix",
+  useSeqnames = NULL,
+  verbose = TRUE,
+  binarize = FALSE,
+  threads = getArchRThreads(),
+  logFile = createLogFile("getMatrixFromProject")
+)
+genescore_matrix_asap = t(genescore_asap2@assays@data$GeneScoreMatrix)
+genescore_matrix_asap = as(genescore_matrix_asap, "dgCMatrix") 
+genescore_names_asap = getFeatures(proj_asap2, useMatrix = "GeneScoreMatrix")
+cell_names = colnames(genescore_asap2@assays@data$GeneScoreMatrix)
+cell_names = gsub("pbmc#","",cell_names)
+
+### save out the data
+
+cell_names2 = proj_asap2$cellNames
+cell_names2 = gsub("pbmc#","",cell_names2)
+idx = match(cell_names, cell_names2)
+lsi = proj_asap2@reducedDims$IterativeLSI@listData$matSVD
+lsi_filt = lsi[idx,]
+write.csv(lsi_filt, "/asap/lsi_pbmc_50.csv") # save out lsi embedding
+writeMM(genescore_matrix_asap, "/asap/genescore_pbmc.txt") # save out gene scores
+rnainfo = data.frame(names = genescore_names_asap)
+write.csv(rnainfo, "/asap/genescore_names_pbmc.csv") # save out gene names
+idx_pro = match(cell_names, adt$barcode)
+write.csv(adt[idx_pro,], "/asap/adt_pbmc.csv") # save out the adt info from these cells
+```
+
+
+We will do clustering and manual annotation on these cells, using seurat v4 wnn clustering
+
+```{r}
+pro = read.csv("/wnn_local_related/asap/adt_pbmc.csv")
+pro$X <- NULL
+rownames(pro) = paste0("cell", c(1:nrow(pro)))
+pro = t(pro)
+
+library(Matrix)
+atac = readMM("/wnn_local_related/asap/genescore_pbmc.txt")
+atac_name = read.csv("/wnn_local_related/asap/genescore_names_pbmc.csv")
+atac = as.data.frame(atac)
+colnames(atac) = atac_name$names
+rownames(atac) = paste0("cell", c(1:nrow(atac)))
+atac = t(atac)
+
+## create seurat v4 object
+library(Seurat)
+asapobj <- CreateSeuratObject(counts = pro, assay = "AB")
+temp = CreateAssayObject(counts = atac, assay = "ATAC")
+asapobj[["ATAC"]] = temp
+
+DefaultAssay(asapobj) <- 'AB'
+VariableFeatures(asapobj) <- rownames(asapobj[["AB"]])
+asapobj <- NormalizeData(asapobj, normalization.method = 'CLR', margin = 2) %>% 
+  ScaleData() %>% RunPCA(reduction.name = 'apca')
+
+lsi = read.csv("/wnn_local_related/asap/lsi_pbmc_50.csv") # using LSI here as the atac embedding for WNN
+lsi$X <- NULL
+colnames(lsi) <- paste0("lsi_", 1:50)
+rownames(lsi)=colnames(pro)
+asapobj[["lsi"]] <- CreateDimReducObject(embeddings = as.matrix(lsi), key = "lsi_", assay = "ATAC")
+
+```
+
+# clustering on wnn embedding
+```{r}
+asapobj <- FindMultiModalNeighbors(asapobj, reduction.list = list("apca", "lsi"), dims.list = list(1:18, 2:40))
+asapobj <- RunUMAP(asapobj, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
+asapobj <- FindClusters(asapobj, graph.name = "wsnn", algorithm = 3, verbose = FALSE, resolution = 0.3)
+p1 <- DimPlot(asapobj, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 2.5) #+ NoLegend()
+p1
+```
+
+# manual annotation
+```{r}
+new.cluster.ids <- c("Naive_CD4","Mem_CD4","Monocyte","NK","Naive_CD8","Mem_CD8","B","OtherT",
+                     "dirt","Monocyte","Naive_CD4")
+names(new.cluster.ids) <- levels(asapobj)
+asapobj <- RenameIdents(asapobj, new.cluster.ids)
+p3 <- DimPlot(asapobj, reduction = 'wnn.umap', label = TRUE) #+ NoLegend()
+p3
+```
+
+# save out the meta data
+```{r}
+meta = read.csv("/wnn_local_related/asap/asap_pbmc_meta.csv")
+meta$human_ann = as.character(Idents(asapobj))
+write.csv(meta, "/wnn_local_related/asap/asap_pbmc_meta.csv")
+```
+
+
+And then we calculate the pca embedding for calc of slt and ari f1 score
+for atac cells lsi embedding was used instead
+
+```{r}
+# script to make the orig embedding for benchmarking
+# asap data
+library(Matrix)
+library(Seurat)
+# pro
+pro = read.csv("/home/bkzhu/super_mario/asap/data/adt_pbmc.csv")
+rownames(pro) = as.character(c(1:nrow(pro)))
+pro = pro[,c(-1,-2)] # remove
+# lsi
+lsi = read.csv("/home/bkzhu/super_mario/asap/data/lsi_pbmc_50.csv")
+lsi = lsi[,c(-1,-2)]# remove the row index and first component
+rownames(lsi) = as.character(c(1:nrow(lsi)))
+# meta
+meta = read.csv("/home/bkzhu/super_mario/asap/data/asap_pbmc_meta.csv")
+
+## remove dirt
+pro = pro[meta$human_ann != "dirt",]
+lsi = lsi[meta$human_ann != "dirt",]
+
+# use seurat as standard to produce reduction
+x_obj=CreateSeuratObject(counts=t(pro),assay="x")
+x_obj <- NormalizeData(x_obj)
+x_obj <- ScaleData(x_obj, features = rownames(x_obj))
+x_obj <- RunPCA(x_obj, features = rownames(x_obj)) #quick check elbow 15 is more then enough
+pca_adt = as.data.frame(x_obj@reductions$pca@cell.embeddings[,c(1:15)])
+pca_adt$label = meta$human_ann[meta$human_ann != "dirt"] #### could change if we want different labels
+write.csv(pca_adt, "/home/bkzhu/super_mario/asap/data/orig_x.csv", row.names=FALSE)
+
+# produce lsi reduction -> you dont really need to
+lsi_peak = lsi[,c(1:15)]
+lsi_peak$label = meta$human_ann[meta$human_ann != "dirt"] #### could change if we want different labels
+write.csv(lsi_peak, "/home/bkzhu/super_mario/asap/data/orig_y.csv", row.names=FALSE)
+
+```
+
+
+
+
+

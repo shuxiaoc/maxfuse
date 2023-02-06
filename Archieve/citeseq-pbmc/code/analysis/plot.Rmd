@@ -1,0 +1,80 @@
+---
+title: "plot_cite"
+output: html_document
+---
+Script to produce citeseq pbmc plots (full panel version)
+These values were calculated before, check the ipynb in this folder for detail
+
+```{r}
+library(ggplot2)
+metrics = read.csv("/bench_test3/output/batch5_resultsV2.csv") # metrics prev calced
+metrics$method <- factor(metrics$method,levels = c("mf", "sr", "lg", "hm","bsc"))
+colorv = c("#f6511d","#ffb400","#00a6ed","#7fb800","#A149FA")
+```
+
+```{r}
+# slt f1 score + matching annotation lv1
+p = ggplot(metrics) + geom_point(aes(x = ann1, y = slt_f1, color = method), size =2, alpha = 0.5) +
+  theme_minimal() + scale_color_manual(values = colorv) +
+  scale_y_continuous(minor_breaks = seq(0, 1, 0.05)) + ylim(c(0.35,0.6)) + xlim(c(0.35,0.97))
+ggsave("/bench_test3/plots/p1V3.svg", height = 3, width = 4.5)
+p
+```
+
+```{r}
+# ari f1 score + matching anotation lv2
+p = ggplot(metrics) + geom_point(aes(x = ann2, y = ari_f1, color = method), size =2, alpha = 0.5) +
+  theme_minimal() + 
+  scale_color_manual(values = colorv) + scale_y_continuous(minor_breaks = seq(0, 1, 0.05)) +
+  ylim(c(0.4,0.65)) + xlim(c(0.28,0.87)) 
+ggsave("/bench_test3/plots/p2V3.svg", height = 3, width = 4.5)
+p
+```
+
+
+```{r}
+# plot foscttm score, since 5 repeats calc sd
+
+library(dplyr)
+# Data
+data <- metrics %>% select(method, foscttm) 
+# Calculates mean, sd, se and IC
+my_sum <- data %>%
+  group_by(method) %>%
+  dplyr::summarise( 
+    n=n(),
+    mean=mean(foscttm),
+    sd=sd(foscttm)
+  ) %>%
+  mutate( se=sd/sqrt(n))  %>%
+  mutate( ic=se * qt((1-0.05)/2 + .5, n-1))
+ 
+# Standard deviation
+p = ggplot(my_sum) +
+  geom_bar( aes(x=method, y=mean, fill=method), stat="identity", alpha=0.7, width = 0.4) +
+  geom_errorbar( aes(x=method, ymin=mean-sd, ymax=mean+sd), width=0.08, colour="black", alpha=0.9, size=0.2) +
+  ggtitle("using standard deviation") + theme_minimal()  + scale_fill_manual(values = colorv) #+ coord_cartesian(ylim=c(0.6,0.97))
+
+ggsave("/bench_test3/plots/p3V2.svg", height = 3, width = 4.5)
+p
+```
+
+
+```{r}
+# plot foscKNN plot along the Ks
+
+knnsearch = read.csv("/bench_test3/output/batch5_knntmpV2.csv")
+knnsearch$step = knnsearch$step+1 # python index dif
+knnsearch$method <- factor(knnsearch$method,levels = c("mf", "sr", "lg", "hm", "bsc"))
+colorv = c("#f6511d","#ffb400","#00a6ed","#7fb800","#A149FA")
+
+p = ggplot(knnsearch,aes(x=step,y=knn_tmp, colour=method,fill = method)) +
+  stat_summary(geom = "line", fun.y = mean, size = 0.2) +
+  stat_summary(geom = "ribbon", fun.data = mean_cl_normal, fun.args=list(conf.int=0.85), alpha = 0.3, colour = NA) +
+  theme_minimal()+ ggtitle("KNN search true match") + scale_fill_manual(values = colorv) + scale_color_manual(values = colorv)
+
+#ggsave("/home/bkzhu/super_mario/bench_test3/plots/p4V2.svg", height = 3, width = 5)
+p
+```
+
+

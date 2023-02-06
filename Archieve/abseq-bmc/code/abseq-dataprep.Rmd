@@ -1,0 +1,157 @@
+---
+title: "data_prep"
+output: html_document
+---
+
+# abseq data of healthy bmc from triana et al.
+# https://figshare.com/articles/dataset/Expression_of_97_surface_markers_and_RNA_transcriptome_wide_in_13165_cells_from_a_healthy_young_bone_marrow_donor/13397987
+
+```{r}
+abseqwta_ref = readRDS("/abseq/data_prep/WTA_projected.rds")
+
+dim(abseqwta_ref@assays$RNA@counts) # 13k cell with 30k genes
+dim(abseqwta_ref@assays$AB@counts) # 13k cell, 105 proteins (97 with isotype controls etc)
+
+```
+
+```{r}
+# remove rare cell types with insufficient amount of numbers
+idx = abseqwta_ref@meta.data$Prediction_Healthy %notin% c("Doublet and Triplets", "Early GMP", "Gamma delta T cells",
+                                               "Immature B cells", "Metaphase MPPs", "Neutrophils")
+
+# protein
+abseqwta_pro = abseqwta_ref@assays$AB@counts[,idx]
+rownames(abseqwta_pro) = gsub("-AB","",rownames(abseqwta_pro))
+abseqwta_pro = as.data.frame(t(abseqwta_pro))
+write.csv(abseqwta_pro, "/abseq/data_prep/abseqwta_pro.csv")
+
+# rna
+library(Matrix)
+abseqwta_rna = abseqwta_ref@assays$RNA@counts[,idx]
+rownames(abseqwta_rna) = gsub("-custom-seq","",rownames(abseqwta_rna))
+abseqwta_rna = as(t(abseqwta_rna), "dgCMatrix")
+writeMM(abseqwta_rna, "/abseq/data_prep/abseqwta_rna.txt")
+rna_name = data.frame(names = colnames(abseqwta_rna))
+write.csv(rna_name, "/abseq/data_prep/abseqwta_rna_names.csv")
+
+# meta 
+abseqwta_meta = abseqwta_ref@meta.data[idx,]
+write.csv(abseqwta_meta, "/abseq/data_prep/abseqwta_meta.csv")
+```
+
+
+##############
+
+
+The original annotation of this dataset was done be prediction, we here re-clustered cells and re-annotated them (manual), using seuratV4 wnn.
+
+```{r}
+# re-annotation with seurat v4 wnn
+
+## create seurat v4 object
+library(Seurat)
+abseqobj <- CreateSeuratObject(counts = t(abseqwta_rna), assay = "RNA")
+temp = CreateAssayObject(counts = t(abseqwta_pro), assay = "AB")
+abseqobj[["AB"]] = temp
+
+## wnn suggested preprocesssing
+library(tidyr)
+
+DefaultAssay(abseqobj) <- 'RNA'
+abseqobj <- NormalizeData(abseqobj) %>% FindVariableFeatures() %>% ScaleData() %>% RunPCA()
+
+DefaultAssay(abseqobj) <- 'AB'
+VariableFeatures(abseqobj) <- rownames(abseqobj[["AB"]])
+abseqobj <- NormalizeData(abseqobj, normalization.method = 'CLR', margin = 2) %>% 
+  ScaleData() %>% RunPCA(reduction.name = 'apca')
+
+#ElbowPlot(abseqobj,reduction = 'pca') # check what pca to use for wnn
+
+abseqobj <- FindMultiModalNeighbors(
+  abseqobj, reduction.list = list("pca", "apca"), 
+  dims.list = list(1:30, 1:18), modality.weight.name = "RNA.weight"
+)
+
+```
+
+check umap and clustering
+
+```{r}
+abseqobj <- RunUMAP(abseqobj, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
+abseqobj <- FindClusters(abseqobj, graph.name = "wsnn", algorithm = 3, resolution = 0.5, verbose = FALSE)
+
+p1 <- DimPlot(abseqobj, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 2.5) #+ NoLegend()
+p1
+```
+
+check if mostly consistant with original prediction
+
+```{r}
+abseqobj@meta.data$pred_label = meta$Prediction_Healthy
+p2 <- DimPlot(abseqobj, reduction = 'wnn.umap', label = TRUE, group.by = "pred_label") #+ NoLegend()
+p2
+```
+
+manual annotation and checking
+
+```{r}
+new.cluster.ids <- c("B","Naive_CD4","HSPC_MPP","Mem_CD4","Mem_CD8","NK","HSPC_EMPP","HSPC_Myetocyte","HSPC_MPP","Naive_CD8",
+                     "Naive_B","DC","B","Mem_CD8","Trans_B","Prog_B","dirty","Monocyte","dirty","HSPC_MPP","dirty")
+names(new.cluster.ids) <- levels(abseqobj)
+abseqobj <- RenameIdents(abseqobj, new.cluster.ids)
+p3 <- DimPlot(abseqobj, reduction = 'wnn.umap', label = TRUE) #+ NoLegend()
+p3
+```
+
+
+################# clustering end
+
+
+create pca reduction for both modalities, used for ari and slt f1 score calculation
+
+```{r}
+# script to make the orig embedding for benchmarking
+# intended input for non-matching related metrices
+
+library(Matrix)
+library(Seurat)
+# rna
+rna = readMM("/abseq/data_prep/abseqwta_rna.txt")
+rna_names = read.csv('/abseq/data_prep/abseqwta_rna_names.csv')
+colnames(rna) = rna_names$names
+rownames(rna) = as.character(c(1:nrow(rna)))
+# pro
+protein = read.csv("/abseq/data_prep/abseqwta_pro.csv")
+protein = protein[,-1]# remove the row index
+rownames(protein) = as.character(c(1:nrow(protein)))
+# meta
+meta = read.csv("/abseq/data_prep/abseqwta_meta.csv")
+
+rna = rna[meta$hm_annotate != "dirty",]
+protein = protein[meta$hm_annotate != "dirty",]
+meta = meta[meta$hm_annotate != "dirty",]
+
+# use seurat as standard to produce reduction
+x_obj=CreateSeuratObject(counts=t(rna),assay="x")
+x_obj <- NormalizeData(x_obj)
+x_obj <- FindVariableFeatures(x_obj, selection.method = "vst", nfeatures = 3000)
+x_obj <- ScaleData(x_obj, features = rownames(x_obj))
+x_obj <- RunPCA(x_obj, features = VariableFeatures(object = x_obj)) #quick check elbow 10 is more then enough
+pca_rna = as.data.frame(x_obj@reductions$pca@cell.embeddings[,c(1:15)])
+pca_rna$label = meta$hm_annotate #### could change if we want different labels
+write.csv(pca_rna, "/home/bkzhu/super_mario/abseq/data_prep/orig_x.csv", row.names=FALSE)
+
+# produce adt reduction
+y_obj=CreateSeuratObject(counts=t(protein),assay="y")
+y_obj <- NormalizeData(y_obj)
+y_obj <- ScaleData(y_obj, features = rownames(y_obj))
+y_obj <- RunPCA(y_obj, features = rownames(y_obj)) #quick check elbow 10 is more then enough
+pca_pro = as.data.frame(y_obj@reductions$pca@cell.embeddings[,c(1:15)])
+pca_pro$label = meta$hm_annotate #### could change if we want different labels
+write.csv(pca_pro, "/home/bkzhu/super_mario/abseq/data_prep/orig_y.csv", row.names=FALSE)
+
+
+```
+
+
+

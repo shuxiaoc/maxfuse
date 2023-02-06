@@ -1,0 +1,134 @@
+---
+title: "data_prep"
+output: html_document
+---
+
+Read the pbmc cite-seq dataset, data retrieved from Hao et al. 2022
+
+```{r}
+library(SeuratDisk)
+library(Seurat)
+library(ggplot2)
+reference <- LoadH5Seurat("pbmc_multimodal.h5seurat")
+
+# save out the data for downstream analysis
+
+rna_counts = as(t(reference@assays$SCT@counts),"dgCMatrix")
+meta_info = reference@meta.data
+rna_names = rownames(reference@assays$SCT@counts)
+
+library(Matrix)
+writeMM(rna_counts, "citeseq_rna_full.txt")
+write.csv(meta_info, "citeseq_meta.csv")
+write.csv(data.frame(names = rna_names), "citeseq_rna_names.csv") # save out the rna names too
+```
+
+
+```{r}
+# script to produce batches for benchmarking
+library(Matrix)
+library(Seurat)
+rna_full = readMM("citeseq_rna_full.txt")
+protei_full = read.csv("citeseq_adt_full.csv")
+meta_full = read.csv("citeseq_meta.csv")
+root = "./input/"
+batch = 5
+#
+#idx = rowSums(rna_full)>0
+
+for (i in c(1:5)){
+  batch_name = paste0("b",as.character(i),"/")
+  out_dir =paste0(root,batch_name)
+  dir.create(out_dir)
+  # create files
+  randix = sample(dim(protei_full)[1], 10000) # every batch test 10k cells
+  rna = rna_full[randix,]
+  pro = protei_full[randix,-1]
+  meta = meta_full[randix,]
+  write.csv(meta, paste0(out_dir,"meta.csv"),row.names = FALSE)
+  write.csv(pro, paste0(out_dir,"pro.csv"),row.names = FALSE)
+  writeMM(rna, paste0(out_dir,"rna.txt"))
+  # create pca reduction orgin files
+  rna_names = read.csv('citeseq_rna_names.csv')
+  colnames(rna) = rna_names$names
+  rownames(rna) = as.character(c(1:nrow(rna)))
+  # pro
+  rownames(pro) = as.character(c(1:nrow(pro)))
+  # meta
+  # use seurat as standard to produce reduction
+  x_obj=CreateSeuratObject(counts=t(rna),assay="x")
+  x_obj <- NormalizeData(x_obj)
+  x_obj <- FindVariableFeatures(x_obj, selection.method = "vst", nfeatures = 3000)
+  x_obj <- ScaleData(x_obj, features = rownames(x_obj))
+  x_obj <- RunPCA(x_obj, features = VariableFeatures(object = x_obj)) 
+  pca_rna = as.data.frame(x_obj@reductions$pca@cell.embeddings[,c(1:15)])
+  pca_rna$label = meta$celltype.l1 # used l1 cell type, used in slt_f1 and ari_f1
+  write.csv(pca_rna, paste0(out_dir,"orig_x.csv"), row.names=FALSE) # this file is used to calc slt_f1 and ari_f1
+  
+  # produce adt reduction
+  y_obj=CreateSeuratObject(counts=t(pro),assay="y")
+  y_obj <- NormalizeData(y_obj)
+  y_obj <- ScaleData(y_obj, features = rownames(y_obj))
+  y_obj <- RunPCA(y_obj, features = rownames(y_obj)) 
+  pca_pro = as.data.frame(y_obj@reductions$pca@cell.embeddings[,c(1:15)])
+  pca_pro$label = meta$celltype.l1 # used l1 cell type, used in slt_f1 and ari_f1
+  write.csv(pca_pro, paste0(out_dir,"orig_y.csv"), row.names=FALSE) # this file is used to calc slt_f1 and ari_f1
+  
+}
+
+```
+
+
+```{r}
+# another batch of 20k cells, this batch of cell was used in umap viz and confusion matrix calc
+
+rna_full = readMM("citeseq_rna_full.txt")
+protei_full = read.csv("citeseq_adt_full.csv")
+meta_full = read.csv("citeseq_meta.csv")
+root = "./reduction/"
+
+set.seed(41)
+randix = sample(dim(protei_full)[1], 20000)
+rna = rna_full[randix,]
+pro = protei_full[randix,-1]
+meta = meta_full[randix,]
+write.csv(meta, "./reduction/meta.csv",row.names = FALSE)
+write.csv(pro, "./reduction/pro.csv",row.names = FALSE)
+writeMM(rna, "./reduction/rna.txt")
+
+```
+
+
+```{r}
+# rank the protein by importance score
+library(randomForest)
+#library(varImp)
+library(caret)
+#Random Forest Modelling
+adt = read.csv("pro.csv")
+meta = read.csv("meta.csv")
+adt = as.data.frame(scale(adt))
+adt$ann = as.factor(meta$celltype.l2) # for random forest prediction, using lv2 cell type 
+model2 <- randomForest(ann ~ ., data = adt, importance=TRUE) 
+#Conditional=True, adjusts for correlations between predictors.
+i_scores <- caret::varImp(model2, conditional=TRUE) # calc the importance score of each marker
+i_scores2 = rowMaxs(as.matrix(i_scores))
+df2 = data.frame(cbind(rownames(i_scores),i_scores2))
+df2$i_scores2 = as.numeric(df2$i_scores2)
+# save out the markers
+top30 = sorted$V1[1:30]
+top50 = sorted$V1[1:50]
+top100 = sorted$V1[1:100]
+full = sorted$V1
+#ll = c(top30, top50, top100)
+write.csv(data.frame(target = as.character(top30)),"rank30.csv")
+write.csv(data.frame(target = as.character(top50)),"rank50.csv")
+write.csv(data.frame(target = as.character(top100)),"rank100.csv")
+write.csv(data.frame(target = as.character(full)),"full.csv")
+```
+
+
+
+
+
+

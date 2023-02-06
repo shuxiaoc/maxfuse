@@ -1,0 +1,232 @@
+---
+title: "GC_changing"
+output: html_document
+---
+
+produce the matched spatial pattern of matched rna cells and plot them along the GC layers regions:
+
+```{r}
+# read in the previously saved tonsil RNA seruat object
+library(SeuratDisk) # remeber no seruat should be loaded only seurat disk
+tonsil.all = LoadH5Seurat("/phase4/tonsil/tonsil_rna_seurat.h5seurat")
+library(ggplot2)
+# read in the previously saved codex cell infos (with layer info and xy positions etc)
+input = read.csv("/tonsil_v2/Codex/FCS_output_DeepCell_extOnly/formatch_clusters_x28_y715_wstepV2.csv")
+input_rna_meta = read.csv("/tonsil_v2/RNA/tonsil_rna_0510_meta.csv")
+```
+
+
+Maxfuse:
+
+
+```{r}
+# based on the matching information, retrieve the target rna expression for each codex cell
+matchid = read.csv("/tonsil_v2/match/match_output/1205_tonsil_fullID.csv")
+matched_cdx = input[matchid$idx2+1,]
+matched_rna = input_rna_meta[matchid$idx1+1,]
+
+id = match(matched_rna$X, colnames(tonsil.all))
+rna_normed = tonsil.all@assays$RNA@counts
+rna_normed_matchec = rna_normed[,id]
+
+# now another step, min max 5-95 percent to plot in same figure
+gtarget = c("BCL6","AICDA","FOXP1","CCR6","FCER2","BANK1","CD4","GATA3","CD3E")
+library(DelayedMatrixStats)
+t = as.matrix(t(rna_normed_matchec[gtarget,]))
+t = as.data.frame(t)
+```
+
+```{r}
+# plot the rna based on regions
+library(patchwork)
+# each gene
+i = 0
+for (gene in gtarget){
+  i = i+1
+  matched_cdx$value = t[,gene]
+  temp2 = subset(matched_cdx, matched_cdx$step !=0)
+  p = ggplot(temp2,aes(x=step,y=value)) +
+  stat_summary(geom = "line", fun.y = mean) +
+  stat_summary(geom = "ribbon", fun.data = mean_cl_normal, fun.args=list(conf.int=0.95), alpha = 0.1, colour = NA) +
+  theme_bw()+ ggtitle(gene) + theme(axis.title.x = element_blank(),
+          axis.title.y = element_blank())
+  assign(paste0("p",i), p)
+  
+}
+p = wrap_plots(p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12)
+ggsave("/tonsil_v2/plots/gc_genes_mf_1205.svg",p, height = 6, width = 11)
+p
+```
+
+
+seurat, same process as done for maxfuse case:
+
+```{r}
+
+matchid = read.csv("/tonsil_v2/match/match_output/full/sr/sr_match_id_y2x_filt03.csv")
+matched_cdx = input[matchid$id1+1,]
+matched_rna = input_rna_meta[matchid$id2+1,]
+
+id = match(matched_rna$X, colnames(tonsil.all))
+#rna_normed = tonsil.all@assays$RNA@counts
+rna_normed_matchec = rna_normed[,id]
+
+# now another step, min max 5-95 percent to plot in same figure
+gtarget = c("BCL6","AICDA","FOXP1","CCR6","FCER2","BANK1","CD4","GATA3","CD3E")
+library(DelayedMatrixStats)
+t = as.matrix(t(rna_normed_matchec[gtarget,]))
+t = as.data.frame(t)
+```
+
+```{r}
+library(patchwork)
+# each gene
+i = 0
+for (gene in gtarget){
+  i = i+1
+  matched_cdx$value = t[,gene]
+  temp2 = subset(matched_cdx, matched_cdx$step !=0)
+  p = ggplot(temp2,aes(x=step,y=value)) +
+  stat_summary(geom = "line", fun.y = mean) +
+  stat_summary(geom = "ribbon", fun.data = mean_cl_normal, fun.args=list(conf.int=0.95), alpha = 0.1, colour = NA) +
+  theme_bw()+ ggtitle(gene) + theme(axis.title.x = element_blank(),
+          axis.title.y = element_blank())
+  assign(paste0("p",i), p)
+  
+}
+p = wrap_plots(p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12)
+ggsave("/tonsil_v2/plots/gc_genes_sr_1101.svg",p, height = 6, width = 11)
+p
+```
+
+
+bindsc, same process as done for maxfuse case:
+
+```{r}
+
+matchid = read.csv("/tonsil_v2/match/match_output/bsc_match_id_y2x_p1p2_filt03.csv")
+matched_cdx = input[matchid$id1+1,]
+matched_rna = input_rna_meta[matchid$id2+1,]
+
+id = match(matched_rna$X, colnames(tonsil.all))
+#rna_normed = tonsil.all@assays$RNA@counts
+rna_normed_matchec = rna_normed[,id]
+
+# now another step, min max 5-95 percent to plot in same figure
+gtarget = c("BCL6","AICDA","FOXP1","CCR6","FCER2","BANK1","CD4","GATA3","CD3E")
+library(DelayedMatrixStats)
+t = as.matrix(t(rna_normed_matchec[gtarget,]))
+t = as.data.frame(t)
+```
+
+```{r}
+library(patchwork)
+# each gene
+i = 0
+for (gene in gtarget){
+  i = i+1
+  matched_cdx$value = t[,gene]
+  temp2 = subset(matched_cdx, matched_cdx$step !=0)
+  p = ggplot(temp2,aes(x=step,y=value)) +
+  stat_summary(geom = "line", fun.y = mean) +
+  stat_summary(geom = "ribbon", fun.data = mean_cl_normal, fun.args=list(conf.int=0.95), alpha = 0.1, colour = NA) +
+  theme_bw()+ ggtitle(gene) + theme(axis.title.x = element_blank(),
+          axis.title.y = element_blank())
+  assign(paste0("p",i), p)
+  
+}
+p = wrap_plots(p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12)
+ggsave("/tonsil_v2/plots/gc_genes_bsc_1101.svg",p, height = 6, width = 11)
+p
+```
+
+harmony, same process as done for maxfuse case:
+
+```{r}
+
+matchid = read.csv("/tonsil_v2/match/match_output/full/hm/hm_match_id_y2x_filt03.csv")
+
+matched_cdx = input[matchid$id1+1,]
+matched_rna = input_rna_meta[matchid$id2+1,]
+
+id = match(matched_rna$X, colnames(tonsil.all))
+#rna_normed = tonsil.all@assays$RNA@counts
+rna_normed_matchec = rna_normed[,id]
+
+# now another step, min max 5-95 percent to plot in same figure
+gtarget = c("BCL6","AICDA","FOXP1","CCR6","FCER2","BANK1","CD4","GATA3","CD3E")
+library(DelayedMatrixStats)
+t = as.matrix(t(rna_normed_matchec[gtarget,]))
+t = as.data.frame(t)
+```
+
+```{r}
+library(patchwork)
+# each gene
+i = 0
+for (gene in gtarget){
+  i = i+1
+  matched_cdx$value = t[,gene]
+  temp2 = subset(matched_cdx, matched_cdx$step !=0)
+  p = ggplot(temp2,aes(x=step,y=value)) +
+  stat_summary(geom = "line", fun.y = mean) +
+  stat_summary(geom = "ribbon", fun.data = mean_cl_normal, fun.args=list(conf.int=0.95), alpha = 0.1, colour = NA) +
+  theme_bw()+ ggtitle(gene) + theme(axis.title.x = element_blank(),
+          axis.title.y = element_blank())
+  assign(paste0("p",i), p)
+  
+}
+p = wrap_plots(p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12)
+ggsave("/tonsil_v2/plots/gc_genes_hm_1101.svg",p, height = 6, width = 11)
+p
+```
+
+
+liger, same process as done for maxfuse case:
+
+```{r}
+matchid = read.csv("/tonsil_v2/match/match_output/full/lg/lg_match_id_y2x_filt03.csv")
+
+# filtered out:
+lgx_fid = read.csv("/tonsil_v2/match/match_output/full/lg/d1_id.csv")
+lgy_fid = read.csv("/tonsil_v2/match/match_output/full/lg/d2_id.csv")
+
+# get filterd input1 and input2
+input1_filt = input[-c(lgy_fid$id),]
+input2_filt = input_rna_meta[-c(lgx_fid$id),]
+
+matched_cdx = input1_filt[matchid$id1+1,]
+matched_rna = input2_filt[matchid$id2+1,]
+
+id = match(matched_rna$X, colnames(tonsil.all))
+rna_normed = tonsil.all@assays$RNA@counts
+rna_normed_matchec = rna_normed[,id]
+
+# now another step, min max 5-95 percent to plot in same figure
+gtarget = c("BCL6","AICDA","FOXP1","CCR6","FCER2","BANK1","CD4","GATA3","CD3E")
+library(DelayedMatrixStats)
+t = as.matrix(t(rna_normed_matchec[gtarget,]))
+t = as.data.frame(t)
+```
+
+```{r}
+library(patchwork)
+# each gene
+i = 0
+for (gene in gtarget){
+  i = i+1
+  matched_cdx$value = t[,gene]
+  temp2 = subset(matched_cdx, matched_cdx$step !=0)
+  p = ggplot(temp2,aes(x=step,y=value)) +
+  stat_summary(geom = "line", fun.y = mean) +
+  stat_summary(geom = "ribbon", fun.data = mean_cl_normal, fun.args=list(conf.int=0.95), alpha = 0.1, colour = NA) +
+  theme_bw()+ ggtitle(gene) + theme(axis.title.x = element_blank(),
+          axis.title.y = element_blank())
+  assign(paste0("p",i), p)
+  
+}
+p = wrap_plots(p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12)
+ggsave("/tonsil_v2/plots/gc_genes_lgvan_1101.svg",p, height = 6, width = 11)
+p
+```
+
