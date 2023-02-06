@@ -1,6 +1,6 @@
 # MaxFuse: Cross-modality matching of single cells via iterative fuzzy smoothed embedding
 
-<img src="https://github.com/shuxiaoc/maxfuse/tree/main/media/ai_generated_icon.png" width="100" height="100">
+<img src="https://github.com/shuxiaoc/maxfuse/blob/main/media/ai_generated_icon.png" width="100" height="100">
 
 ## Description
 
