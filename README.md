@@ -18,6 +18,8 @@ installation instruction here.
 
 linke to sphinx ?
 
+Note in cases when integratinng single cell data across **protein** and **RNA** modalities, many times the nomenclature of features are differnet (eg. mRNA ```ITGAM``` could be named as ```CD11b-1``` when used as antibody). We gathered a [.csv](https://github.com/shuxiaoc/maxfuse/blob/main/docs/protein_gene_conversion.csv) file that covers many of such naming conversions and used during the ```MaxFuse``` process. Of course, this is not a complete conversion, and users should manually add in new naming conversions if they were not included in this csv file. 
+
 ## Code arcive
 
 The analysis presented in the [manuscript](https://www.biorxiv.org/content/10.1101/2023.01.12.523851v2) was also deposited in this GitHub repository, under this [folder](https://github.com/shuxiaoc/maxfuse/tree/main/Archieve). Note in the manuscript we used a development version of ```MaxFuse``` with slightly different grammar and can also be found there. If you require additional inforamtion on the analysis/data, please contact Zongming Ma (zongming@wharton.upenn.edu).
