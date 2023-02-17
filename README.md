@@ -12,11 +12,14 @@ This work has been lead by Shuxiao Chen from [Zongming Lab](http://www-stat.whar
 
 ## Installation
 
-installation instruction here.
+installation instruction here. update once @shuxiao uploaded the python code to pypi.
 
 ## Usage
 
 linke to sphinx ?
+two ipynb link:
+Example1: Protein -- RNA test run on groundtruth CITE-seq [here](https://github.com/shuxiaoc/maxfuse/blob/main/docs/citeseq_pbmc_evaluate.ipynb).
+Example2: Protein -- RNA test run on tissue [here](https://github.com/shuxiaoc/maxfuse/blob/main/docs/tonsil_codex_rnaseq.ipynb).
 
 Note in cases when integratinng single cell data across **protein** and **RNA** modalities, many times the nomenclature of features are differnet (eg. mRNA ```ITGAM``` could be named as ```CD11b-1``` when used as antibody). We gathered a [.csv](https://github.com/shuxiaoc/maxfuse/blob/main/docs/protein_gene_conversion.csv) file that covers many of such naming conversions and used during the ```MaxFuse``` process. Of course, this is not a complete conversion, and users should manually add in new naming conversions if they were not included in this csv file. 
 
