@@ -1,0 +1,912 @@
+---
+title: "nature_plot"
+output: html_document
+---
+
+This script is for producing the figures presented in the "High resolution single cell maps reveals distinct cell organization and function across different regions of the human intestine" that were related to MaxFuse analysis.
+
+
+
+
+
+First we do figure producing related to the small bowel dataset:
+
+```{r}
+# read in the labels of the cells. This is the cell type annotations of the cells used as input for MaxFuse integration, read here because we want to color the cells based on their cell types during the umap visualization of integrated result
+
+rna_label = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/rna_SB_label.csv")
+pro_label = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/pro_SB_label.csv")
+
+
+## read in the files (produced in the MaxFuse script), include the cca scores embedded by umap, the unique snrnaseq cell, the codex cells (all after filtering)
+embedd = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/SB_0718/full21_unique_embedding.csv")
+dfidx1 = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/SB_0718/full21_unique_data1.csv")
+dfidx2 = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/SB_0718/full21.csv")
+
+
+## since for visualization total amount of CODEX ~ 1million, we just subsample for plotting
+set.seed(42)
+n1 = dim(dfidx1)[1] # number of unique snrnaseq cells that got matched
+n2 = dim(dfidx2)[1] # number of unqieu codex cells that got matched
+n3 = n1+1
+n4 = n1+n2
+##
+
+## quick and dirty subsample
+temp_cdx = embedd[c(n3:n4),]
+ridx1 = sample(nrow(temp_cdx), 40000) ## note subsampled
+
+
+## now produce integrated umap visuzliation, colored by modality
+label = rep("other",dim(embedd)[1])
+label[c(1:n1)] = "scRNA"
+label[c(n3:n4)] = "CODEX"
+
+
+p = ggplot(temp_cdx[ridx1,], aes(umap1, umap2)) + geom_point(size = 0.3, stroke = 0.3, color = "#8baaca") + theme_classic()
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/temp_plots/SB_fullt21_unique_pro.png",p,height = 7, width = 7.5)
+p
+```
+
+
+```{r}
+library(ggsci)
+# then color the umap based on original hubmap annotations
+
+label_orig = c(as.character(rna_label$label[dfidx1$data1+1]), as.character(pro_label$label[dfidx2$data2+1][ridx1]))
+temp_cdx_all = rbind(embedd[c(1:n1),], temp_cdx[ridx1,])
+p = ggplot(temp_cdx_all, aes(umap1, umap2, color = label_orig)) +
+  geom_point(size = 0.3, stroke = 0.3) + scale_color_npg() + theme_classic()
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/temp_plots/SB_full21_cell.png",p,height = 7, width = 9)
+p
+
+```
+
+
+
+Then we can start produce the integrated umap plots with protein/rna expression
+
+
+```{r}
+
+## read in codex expression dataframe. This file is just the same input we have used in the MaxFuse code. We manually combined them into one single csv file so it is just easier to handle in this code
+full_cdx = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/SB_proinput.csv")
+
+### now we extract the cells that were used in the umap plotting 
+portein_protein_use = full_cdx[dfidx2$data2+1,] # codex cells after filtering (they all have one rnaseq match)
+portein_protein_use = portein_protein_use[ridx1,] # then dont forget we did subsetting
+
+### similarly we can get the rna expression of these cells based on the matching information
+rna_matched = full_cdx[dfidx2$data2+1,]
+rna_matched$data1 = dfidx2$data1 # get the matching rna cell index
+rnaid = match(dfidx1$data1, rna_matched$data1) # match index
+rna_protein_use= rna_matched[rnaid,] # this is the subset of codex cells used in umap viz, and the matched rna cell index
+
+#### read in of rna counts. This file is just the same input we have used in the MaxFuse code. We manually combined them into one single csv file so it is just easier to handle in this code
+full_rna = readMM("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/SB_rnainput.txt.mtx")
+name = read.csv('/home/bkzhu/MaxFuse/production/hubmap/match/data/SB_immune_rna_names.csv')[,"names"]
+colnames(full_rna) = name
+rownames(full_rna) = paste0("cell", c(1:nrow(full_rna)))
+
+# quick normalization process, here just using the default seurat process
+tmp_obj = CreateSeuratObject(counts=t(full_rna),assay="RNA")
+tmp_obj = NormalizeData(tmp_obj)
+full_rna_norm = t(tmp_obj@assays$RNA@data)
+# norm end
+
+# just pick the genes we are showing
+target_genes = c("MUC6","MUC1","MUC2","MUC4","MUC5B")
+full_rna_sub = full_rna_norm[,target_genes]
+
+### protein_cell_rna information
+portein_rna_use = full_rna_sub[dfidx2$data1+1,]
+portein_rna_use = portein_rna_use[ridx1,]
+portein_rna_use = as.data.frame(portein_rna_use)
+
+### rna_cell_rna information
+rna_matched = full_rna_sub[dfidx2$data1+1,]
+rna_matched = as.data.frame(rna_matched)
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_rna_use= rna_matched[rnaid,]
+
+############### combine dataframe for seurat usage
+
+# pro
+com = intersect(colnames(rna_protein_use), colnames(portein_protein_use))
+rownames(rna_protein_use) = paste0("rna_",c(1:nrow(rna_protein_use)))
+rownames(portein_protein_use) = paste0("pro_",c(1:nrow(portein_protein_use)))
+protein_assay = rbind(rna_protein_use[, com], portein_protein_use[,com])
+
+# rna
+com = intersect(colnames(rna_rna_use), colnames(portein_rna_use))
+rownames(rna_rna_use) = paste0("rna_",c(1:nrow(rna_rna_use)))
+rownames(portein_rna_use) = paste0("pro_",c(1:nrow(portein_rna_use)))
+rna_assay = rbind(rna_rna_use[, com], portein_rna_use[,com])
+
+## start constructing a seurat object
+library(Seurat)
+hbmp_obj = CreateSeuratObject(counts=t(rna_assay),assay="RNA")
+hbmp_obj = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(rna_assay), assay="RNA")
+
+hbmp_obj[["pro"]]=CreateAssayObject(counts = t(protein_assay[,c(4:50)]))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(protein_assay[,c(4:50)]), assay="pro")
+# put embed
+cca_embed=temp_cdx_all[,c("umap1","umap2")]
+colnames(cca_embed) <- paste0("cca_", 1:2)
+rownames(cca_embed)=rownames(rna_assay)
+hbmp_obj[["cca"]] <- CreateDimReducObject(embeddings = as.matrix(cca_embed), key = "cca_", assay = "RNA")
+
+## feature plot
+DefaultAssay(hbmp_obj) <- 'RNA'
+p=FeaturePlot(hbmp_obj, features =  c("MUC2"), slot = "data",
+              min.cutoff = "q05", max.cutoff = "q90", ncol = 1, reduction = "cca",
+              pt.size = 0.6,cols=c("lightgrey","#05668D"), raster=FALSE)
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/temp_plots/SB_full21_muc2_norm.png",p, height = 7, width = 8)
+p
+```
+
+```{r}
+DefaultAssay(hbmp_obj) <- 'pro'
+p=FeaturePlot(hbmp_obj, features =  c("MUC2"),
+              min.cutoff = "q05", max.cutoff = "q90", ncol = 1, reduction = "cca",
+              pt.size = 0.6,cols=c("lightgrey","#05668D"), raster=FALSE)
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/temp_plots/SB_full21_muc2cdx.png",p,height = 7, width = 8)
+p
+```
+
+
+############### same process but this time the inner foliclle genes
+
+
+```{r}
+
+## create duplicated proteion information
+full_cdx = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/SB_proinput.csv")
+
+### protein_cell_protein information
+portein_protein_use = full_cdx[dfidx2$data2+1,]
+portein_protein_use = portein_protein_use[ridx1,]
+
+### rna_cell_protein information
+rna_matched = full_cdx[dfidx2$data2+1,]
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_protein_use= rna_matched[rnaid,]
+
+#### rna related
+full_rna = readMM("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/SB_rnainput.txt.mtx")
+name = read.csv('/home/bkzhu/MaxFuse/production/hubmap/match/data/SB_immune_rna_names.csv')[,"names"]
+colnames(full_rna) = name
+rownames(full_rna) = paste0("cell", c(1:nrow(full_rna)))
+# quick norm
+tmp_obj = CreateSeuratObject(counts=t(full_rna),assay="RNA")
+tmp_obj = NormalizeData(tmp_obj)
+full_rna_norm = t(tmp_obj@assays$RNA@data)
+# norm end
+target_genes = c("BANK1","BLK","ARHGAP24","RIPOR2","AFF3","MS4A1","MARCH1","BACH2","ARHGAP15","PRKCB","TMEM131L","OSBPL10",
+                 "ST6GAL1","INPP5D","PPP1R16B","ADAM28","BCL11A","RCSD1","SP110","RALGPS2")
+full_rna_sub = full_rna_norm[,target_genes]
+full_rna_sub = as.data.frame(full_rna_sub)
+full_rna_sub$sum = rowSums(full_rna_sub)
+full_rna_sub$avg = rowMeans(full_rna_sub)
+
+### protein_cell_rna information
+portein_rna_use = full_rna_sub[dfidx2$data1+1,]
+portein_rna_use = portein_rna_use[ridx1,]
+portein_rna_use = as.data.frame(portein_rna_use)
+
+### rna_cell_rna information
+rna_matched = full_rna_sub[dfidx2$data1+1,]
+rna_matched = as.data.frame(rna_matched)
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_rna_use= rna_matched[rnaid,]
+
+############### combine dataframe for seurat usage
+
+# pro
+com = intersect(colnames(rna_protein_use), colnames(portein_protein_use))
+rownames(rna_protein_use) = paste0("rna_",c(1:nrow(rna_protein_use)))
+rownames(portein_protein_use) = paste0("pro_",c(1:nrow(portein_protein_use)))
+protein_assay = rbind(rna_protein_use[, com], portein_protein_use[,com])
+
+# rna
+com = intersect(colnames(rna_rna_use), colnames(portein_rna_use))
+rownames(rna_rna_use) = paste0("rna_",c(1:nrow(rna_rna_use)))
+rownames(portein_rna_use) = paste0("pro_",c(1:nrow(portein_rna_use)))
+rna_assay = rbind(rna_rna_use[, com], portein_rna_use[,com])
+
+## start constructing a seurat object
+library(Seurat)
+hbmp_obj = CreateSeuratObject(counts=t(rna_assay),assay="RNA")
+hbmp_obj = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(rna_assay), assay="RNA")
+hbmp_obj[["pro"]]=CreateAssayObject(counts = t(protein_assay[,c(4:50)]))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(protein_assay[,c(4:50)]), assay="pro")
+# put embed
+cca_embed=temp_cdx_all[,c("umap1","umap2")]
+colnames(cca_embed) <- paste0("cca_", 1:2)
+rownames(cca_embed)=rownames(rna_assay)
+hbmp_obj[["cca"]] <- CreateDimReducObject(embeddings = as.matrix(cca_embed), key = "cca_", assay = "RNA")
+
+## feature plot
+DefaultAssay(hbmp_obj) <- 'RNA'
+p=FeaturePlot(hbmp_obj, features =  c("sum"),
+              min.cutoff = "q05", max.cutoff = "q90", ncol = 1, reduction = "cca",
+              pt.size = 0.6,cols=c("lightgrey","#05668D"), raster=FALSE)
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/temp_plots/SB_full21_innerfol_sum.png",p, height = 7, width = 8)
+p
+```
+
+
+
+
+
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+
+
+
+
+
+Now we repeat everything (the same process), but for colon cells
+
+
+```{r}
+# label version
+rna_label = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/rna_CL_label.csv")
+pro_label = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/pro_CL_label.csv")
+
+
+# cl version
+embedd = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/CL_0719/full21_unique_embedding.csv")
+dfidx1 = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/CL_0719/full21_unique_data1.csv") # got deleted accidentally
+dfidx2 = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/CL_0719/full21.csv")
+
+set.seed(42)
+n1 = dim(dfidx1)[1]
+n2 = dim(dfidx2)[1]
+n3 = n1+1
+n4 = n1+n2
+
+temp_cdx = embedd[c(n3:n4),]
+ridx1 = sample(nrow(temp_cdx), 40000) ## note subsampled
+
+label = rep("other",dim(embedd)[1])
+label[c(1:n1)] = "scRNA"
+label[c(n3:n4)] = "CODEX"
+
+
+p = ggplot(temp_cdx[ridx1,], aes(umap1, umap2)) + geom_point(size = 0.3, stroke = 0.3, color = "#8baaca") + theme_classic()
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/temp_plots/CL_fullt21_unique_pro.png",p,height = 7, width = 7.5)
+p
+```
+
+
+```{r}
+#install.packages("ggsci")
+library(ggsci)
+
+label_orig = c(as.character(rna_label$label[dfidx1$data1+1]), as.character(pro_label$label[dfidx2$data2+1][ridx1]))
+temp_cdx_all = rbind(embedd[c(1:n1),], temp_cdx[ridx1,])
+p = ggplot(temp_cdx_all, aes(umap1, umap2, color = label_orig)) +
+  geom_point(size = 0.3, stroke = 0.3) + scale_color_npg() + theme_classic()
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/temp_plots/CL_full21_cell.png",p,height = 7, width = 9)
+p
+
+```
+
+
+```{r}
+
+## create duplicated proteion information
+full_cdx = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/CL_proinput.csv")
+
+### protein_cell_protein information
+portein_protein_use = full_cdx[dfidx2$data2+1,]
+portein_protein_use = portein_protein_use[ridx1,]
+
+### rna_cell_protein information
+rna_matched = full_cdx[dfidx2$data2+1,]
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_protein_use= rna_matched[rnaid,]
+
+#### rna related
+full_rna = readMM("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/CL_rnainput.txt.mtx")
+name = read.csv('/home/bkzhu/MaxFuse/production/hubmap/match/data/SB_immune_rna_names.csv')[,"names"]
+colnames(full_rna) = name
+rownames(full_rna) = paste0("cell", c(1:nrow(full_rna)))
+# quick norm
+tmp_obj = CreateSeuratObject(counts=t(full_rna),assay="RNA")
+tmp_obj = NormalizeData(tmp_obj)
+full_rna_norm = t(tmp_obj@assays$RNA@data)
+# norm end
+target_genes = c("MUC6","MUC1","MUC2","MUC4","MUC5B")
+full_rna_sub = full_rna_norm[,target_genes]
+
+### protein_cell_rna information
+portein_rna_use = full_rna_sub[dfidx2$data1+1,]
+portein_rna_use = portein_rna_use[ridx1,]
+portein_rna_use = as.data.frame(portein_rna_use)
+
+### rna_cell_rna information
+rna_matched = full_rna_sub[dfidx2$data1+1,]
+rna_matched = as.data.frame(rna_matched)
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_rna_use= rna_matched[rnaid,]
+
+############### combine dataframe for seurat usage
+
+# pro
+com = intersect(colnames(rna_protein_use), colnames(portein_protein_use))
+rownames(rna_protein_use) = paste0("rna_",c(1:nrow(rna_protein_use)))
+rownames(portein_protein_use) = paste0("pro_",c(1:nrow(portein_protein_use)))
+protein_assay = rbind(rna_protein_use[, com], portein_protein_use[,com])
+
+# rna
+com = intersect(colnames(rna_rna_use), colnames(portein_rna_use))
+rownames(rna_rna_use) = paste0("rna_",c(1:nrow(rna_rna_use)))
+rownames(portein_rna_use) = paste0("pro_",c(1:nrow(portein_rna_use)))
+rna_assay = rbind(rna_rna_use[, com], portein_rna_use[,com])
+
+## start constructing a seurat object
+library(Seurat)
+hbmp_obj = CreateSeuratObject(counts=t(rna_assay),assay="RNA")
+hbmp_obj = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(rna_assay), assay="RNA")
+hbmp_obj[["pro"]]=CreateAssayObject(counts = t(protein_assay[,c(4:50)]))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(protein_assay[,c(4:50)]), assay="pro")
+# put embed
+cca_embed=temp_cdx_all[,c("umap1","umap2")]
+colnames(cca_embed) <- paste0("cca_", 1:2)
+rownames(cca_embed)=rownames(rna_assay)
+hbmp_obj[["cca"]] <- CreateDimReducObject(embeddings = as.matrix(cca_embed), key = "cca_", assay = "RNA")
+
+## feature plot
+DefaultAssay(hbmp_obj) <- 'RNA'
+p=FeaturePlot(hbmp_obj, features =  c("MUC2"),
+              min.cutoff = "q05", max.cutoff = "q90", ncol = 1, reduction = "cca",
+              pt.size = 0.6,cols=c("lightgrey","#05668D"), raster=FALSE)
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/temp_plots/CL_full21_muc2_norm.png",p, height = 7, width = 8)
+p
+```
+
+
+```{r}
+DefaultAssay(hbmp_obj) <- 'pro'
+p=FeaturePlot(hbmp_obj, features =  c("MUC2"),
+              min.cutoff = "q05", max.cutoff = "q90", ncol = 1, reduction = "cca",
+              pt.size = 0.6,cols=c("lightgrey","#05668D"), raster=FALSE)
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/temp_plots/CL_full21_muc2cdx.png",p,height = 7, width = 8)
+p
+```
+
+
+################## inner foliclle
+
+
+```{r}
+# norm end
+target_genes = c("BANK1","BLK","ARHGAP24","RIPOR2","AFF3","MS4A1","MARCH1","BACH2","ARHGAP15","PRKCB","TMEM131L","OSBPL10",
+                 "ST6GAL1","INPP5D","PPP1R16B","ADAM28","BCL11A","RCSD1","SP110","RALGPS2")
+full_rna_sub = full_rna_norm[,target_genes]
+full_rna_sub = as.data.frame(full_rna_sub)
+full_rna_sub$sum = rowSums(full_rna_sub)
+full_rna_sub$avg = rowMeans(full_rna_sub)
+
+### protein_cell_rna information
+portein_rna_use = full_rna_sub[dfidx2$data1+1,]
+portein_rna_use = portein_rna_use[ridx1,]
+portein_rna_use = as.data.frame(portein_rna_use)
+
+### rna_cell_rna information
+rna_matched = full_rna_sub[dfidx2$data1+1,]
+rna_matched = as.data.frame(rna_matched)
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_rna_use= rna_matched[rnaid,]
+
+############### combine dataframe for seurat usage
+
+# pro
+com = intersect(colnames(rna_protein_use), colnames(portein_protein_use))
+rownames(rna_protein_use) = paste0("rna_",c(1:nrow(rna_protein_use)))
+rownames(portein_protein_use) = paste0("pro_",c(1:nrow(portein_protein_use)))
+protein_assay = rbind(rna_protein_use[, com], portein_protein_use[,com])
+
+# rna
+com = intersect(colnames(rna_rna_use), colnames(portein_rna_use))
+rownames(rna_rna_use) = paste0("rna_",c(1:nrow(rna_rna_use)))
+rownames(portein_rna_use) = paste0("pro_",c(1:nrow(portein_rna_use)))
+rna_assay = rbind(rna_rna_use[, com], portein_rna_use[,com])
+
+## start constructing a seurat object
+library(Seurat)
+hbmp_obj = CreateSeuratObject(counts=t(rna_assay),assay="RNA")
+hbmp_obj = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(rna_assay), assay="RNA")
+hbmp_obj[["pro"]]=CreateAssayObject(counts = t(protein_assay[,c(4:50)]))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(protein_assay[,c(4:50)]), assay="pro")
+# put embed
+cca_embed=temp_cdx_all[,c("umap1","umap2")]
+colnames(cca_embed) <- paste0("cca_", 1:2)
+rownames(cca_embed)=rownames(rna_assay)
+hbmp_obj[["cca"]] <- CreateDimReducObject(embeddings = as.matrix(cca_embed), key = "cca_", assay = "RNA")
+
+## feature plot
+DefaultAssay(hbmp_obj) <- 'RNA'
+p=FeaturePlot(hbmp_obj, features =  c("sum"),
+              min.cutoff = "q05", max.cutoff = "q90", ncol = 1, reduction = "cca",
+              pt.size = 0.6,cols=c("lightgrey","#05668D"), raster=FALSE)
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/temp_plots/CL_full21_innerfoli_sum.png",p, height = 7, width = 8)
+p
+```
+
+
+
+
+
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+
+Now we start to do analysis related to cellular neighborhoods. These neighborhoods are predefined by John from their CODEX analysis and saved as meta information
+
+```{r}
+# ths same usual stuff
+
+embedd = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/SB_0718/full21_unique_embedding.csv")
+dfidx1 = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/SB_0718/full21_unique_data1.csv")
+dfidx2 = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/SB_0718/full21.csv")
+
+set.seed(42)
+n1 = dim(dfidx1)[1]
+n2 = dim(dfidx2)[1]
+n3 = n1+1
+n4 = n1+n2
+
+temp_cdx = embedd[c(n3:n4),]
+ridx1 = sample(nrow(temp_cdx), 40000) ## note subsampled
+
+## create duplicated proteion information
+full_cdx = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/SB_proinput.csv")
+
+### protein_cell_protein information
+portein_protein_use = full_cdx[dfidx2$data2+1,]
+portein_protein_use = portein_protein_use[ridx1,]
+
+### rna_cell_protein information
+rna_matched = full_cdx[dfidx2$data2+1,]
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_protein_use= rna_matched[rnaid,]
+
+#### rna related
+full_rna = readMM("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/SB_rnainput.txt.mtx")
+name = read.csv('/home/bkzhu/MaxFuse/production/hubmap/match/data/SB_immune_rna_names.csv')[,"names"]
+colnames(full_rna) = name
+vg = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/SB_0718/variable_genes.csv") ### here since doing the analysis on all the genes is bit slow, we just use the variable genes based on rna expression, default seurat variablegene function
+
+target_genes = vg$genes
+full_rna_sub = full_rna[,target_genes]
+
+### protein_cell_rna information
+portein_rna_use = full_rna_sub[dfidx2$data1+1,]
+portein_rna_use = portein_rna_use[ridx1,]
+portein_rna_use = as.data.frame(portein_rna_use)
+
+### rna_cell_rna information
+rna_matched = full_rna_sub[dfidx2$data1+1,]
+rna_matched = as.data.frame(rna_matched)
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_rna_use= rna_matched[rnaid,]
+
+############### combine dataframe for seurat usage
+
+# pro
+com = intersect(colnames(rna_protein_use), colnames(portein_protein_use))
+rownames(rna_protein_use) = paste0("rna_",c(1:nrow(rna_protein_use)))
+rownames(portein_protein_use) = paste0("pro_",c(1:nrow(portein_protein_use)))
+protein_assay = rbind(rna_protein_use[, com], portein_protein_use[,com]) ## note this file then contains the predefined neighborhood information from codex analysis from John
+
+# rna
+com = intersect(colnames(rna_rna_use), colnames(portein_rna_use))
+rownames(rna_rna_use) = paste0("rna_",c(1:nrow(rna_rna_use)))
+rownames(portein_rna_use) = paste0("pro_",c(1:nrow(portein_rna_use)))
+rna_assay = rbind(rna_rna_use[, com], portein_rna_use[,com])
+
+## start constructing a seurat object
+library(Seurat)
+hbmp_obj = CreateSeuratObject(counts=t(rna_assay),assay="RNA")
+hbmp_obj = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(rna_assay), assay="RNA")
+hbmp_obj[["pro"]]=CreateAssayObject(counts = t(protein_assay[,c(4:50)]))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(protein_assay[,c(4:50)]), assay="pro")
+
+## add in all the meta info, but eventually the "Neighborhood" level analysis was used
+hbmp_obj@meta.data$nbhd = protein_assay$Neighborhood
+hbmp_obj@meta.data$cmt = protein_assay$Community
+hbmp_obj@meta.data$nbhd_ind = protein_assay$Neighborhood_Ind
+# need to norm
+hbmp_obj = NormalizeData(hbmp_obj)
+hbmp_obj <- ScaleData(hbmp_obj)
+
+Idents(hbmp_obj) = hbmp_obj$nbhd
+hbmp_obj.small <- subset(hbmp_obj, downsample = 700) # roughly 13000 cells
+
+target = unique(hbmp_obj$nbhd)[unique(hbmp_obj$nbhd) %notin% c("CD66+ Mature Epithelial","Glandular Epithelial")]
+target = as.character(target)
+
+hbmp_obj.small = subset(hbmp_obj.small, idents = target)
+
+markers <- FindAllMarkers(hbmp_obj.small, assay = "RNA", only.pos = TRUE, min.pct = 0.3, logfc.threshold = 0.25)
+markers %>%
+  dplyr::filter(p_val_adj < 0.05) %>%
+  group_by(cluster) %>%
+  top_n(n = 30, wt = avg_logFC) -> siggene
+
+write.csv(siggene, "/home/bkzhu/MaxFuse/hubmap_phase2/match/output/SB_0718/siggene.csv") # also save out the significant genes (based on neighborhoods)
+
+library(viridis)
+p = DoHeatmap(hbmp_obj.small, features = siggene$gene, assay = "RNA", disp.max = 2.5, disp.min = -1.2) + scale_fill_viridis()
+
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/plots/nhbd_rna_profile_SB_vird.tiff", plot = p, width=12, height=36)
+p
+```
+
+
+#
+#
+#
+#
+#
+#
+#
+#
+#
+
+Then we repeat the same thing for Colon cells
+
+```{r}
+embedd = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/CL_0719/full21_unique_embedding.csv")
+dfidx1 = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/CL_0719/full21_unique_data1.csv")
+dfidx2 = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/CL_0719/full21.csv")
+
+set.seed(42)
+n1 = dim(dfidx1)[1]
+n2 = dim(dfidx2)[1]
+n3 = n1+1
+n4 = n1+n2
+
+temp_cdx = embedd[c(n3:n4),]
+ridx1 = sample(nrow(temp_cdx), 40000) ## note subsampled
+
+## create duplicated proteion information
+full_cdx = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/CL_proinput.csv")
+
+### protein_cell_protein information
+portein_protein_use = full_cdx[dfidx2$data2+1,]
+portein_protein_use = portein_protein_use[ridx1,]
+
+### rna_cell_protein information
+rna_matched = full_cdx[dfidx2$data2+1,]
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_protein_use= rna_matched[rnaid,]
+
+#### rna related
+full_rna = readMM("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/CL_rnainput.txt.mtx")
+name = read.csv('/home/bkzhu/MaxFuse/production/hubmap/match/data/SB_immune_rna_names.csv')[,"names"]
+colnames(full_rna) = name
+vg = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/CL_0719/variable_genes.csv")
+target_genes = vg$genes
+full_rna_sub = full_rna[,target_genes]
+
+
+### protein_cell_rna information
+portein_rna_use = full_rna_sub[dfidx2$data1+1,]
+portein_rna_use = portein_rna_use[ridx1,]
+portein_rna_use = as.data.frame(portein_rna_use)
+
+### rna_cell_rna information
+rna_matched = full_rna_sub[dfidx2$data1+1,]
+rna_matched = as.data.frame(rna_matched)
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_rna_use= rna_matched[rnaid,]
+
+############### combine dataframe for seurat usage
+
+# pro
+com = intersect(colnames(rna_protein_use), colnames(portein_protein_use))
+rownames(rna_protein_use) = paste0("rna_",c(1:nrow(rna_protein_use)))
+rownames(portein_protein_use) = paste0("pro_",c(1:nrow(portein_protein_use)))
+protein_assay = rbind(rna_protein_use[, com], portein_protein_use[,com])
+
+# rna
+com = intersect(colnames(rna_rna_use), colnames(portein_rna_use))
+rownames(rna_rna_use) = paste0("rna_",c(1:nrow(rna_rna_use)))
+rownames(portein_rna_use) = paste0("pro_",c(1:nrow(portein_rna_use)))
+rna_assay = rbind(rna_rna_use[, com], portein_rna_use[,com])
+
+## start constructing a seurat object
+library(Seurat)
+hbmp_obj = CreateSeuratObject(counts=t(rna_assay),assay="RNA")
+hbmp_obj = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(rna_assay), assay="RNA")
+hbmp_obj[["pro"]]=CreateAssayObject(counts = t(protein_assay[,c(4:50)]))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(protein_assay[,c(4:50)]), assay="pro")
+hbmp_obj@meta.data$nbhd = protein_assay$Neighborhood
+hbmp_obj@meta.data$cmt = protein_assay$Community
+hbmp_obj@meta.data$nbhd_ind = protein_assay$Neighborhood_Ind
+# need to norm
+hbmp_obj = NormalizeData(hbmp_obj)
+hbmp_obj <- ScaleData(hbmp_obj)
+
+Idents(hbmp_obj) = hbmp_obj$nbhd
+hbmp_obj.small <- subset(hbmp_obj, downsample = 700) # roughly 13000 cells
+
+target = unique(hbmp_obj$nbhd)[unique(hbmp_obj$nbhd) %notin% c("CD66+ Mature Epithelial","Glandular Epithelial")]
+target = as.character(target)
+
+hbmp_obj.small = subset(hbmp_obj.small, idents = target)
+
+markers <- FindAllMarkers(hbmp_obj.small, assay = "RNA", only.pos = TRUE, min.pct = 0.3, logfc.threshold = 0.25)
+markers %>%
+  dplyr::filter(p_val_adj < 0.05) %>%
+  group_by(cluster) %>%
+  top_n(n = 30, wt = avg_logFC) -> siggene
+
+write.csv(siggene, "/home/bkzhu/MaxFuse/hubmap_phase2/match/output/CL_0719/siggene.csv")
+
+library(viridis)
+p = DoHeatmap(hbmp_obj.small, features = siggene$gene, assay = "RNA", disp.max = 2.5, disp.min = -1.2) + scale_fill_viridis()
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/plots/nhbd_rna_profile_CL_vird.tiff", plot = p, width=12, height=36)
+p
+```
+
+
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+
+We also made the same plot for the neighborhood analysis, but in this iteration the genes used were same across small bowel and colon group.
+
+
+load previously saved significant genes:
+```{r}
+sg = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/SB_0718/siggene.csv")
+cg = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/CL_0719/siggene.csv")
+
+sg = intersect(sg$gene, cg$gene)
+length(sg)
+```
+
+
+# all the same code but ths time used the sharing significant genes:
+```{r}
+embedd = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/SB_0718/full21_unique_embedding.csv")
+dfidx1 = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/SB_0718/full21_unique_data1.csv")
+dfidx2 = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/SB_0718/full21.csv")
+
+set.seed(42)
+n1 = dim(dfidx1)[1]
+n2 = dim(dfidx2)[1]
+n3 = n1+1
+n4 = n1+n2
+
+temp_cdx = embedd[c(n3:n4),]
+ridx1 = sample(nrow(temp_cdx), 40000) ## note subsampled
+
+## create duplicated proteion information
+full_cdx = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/SB_proinput.csv")
+
+### protein_cell_protein information
+portein_protein_use = full_cdx[dfidx2$data2+1,]
+portein_protein_use = portein_protein_use[ridx1,]
+
+### rna_cell_protein information
+rna_matched = full_cdx[dfidx2$data2+1,]
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_protein_use= rna_matched[rnaid,]
+
+#### rna related
+full_rna = readMM("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/SB_rnainput.txt.mtx")
+name = read.csv('/home/bkzhu/MaxFuse/production/hubmap/match/data/SB_immune_rna_names.csv')[,"names"]
+colnames(full_rna) = name
+vg = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/SB_0718/variable_genes.csv")
+target_genes = sg
+full_rna_sub = full_rna[,target_genes]
+
+
+### protein_cell_rna information
+portein_rna_use = full_rna_sub[dfidx2$data1+1,]
+portein_rna_use = portein_rna_use[ridx1,]
+portein_rna_use = as.data.frame(portein_rna_use)
+
+### rna_cell_rna information
+rna_matched = full_rna_sub[dfidx2$data1+1,]
+rna_matched = as.data.frame(rna_matched)
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_rna_use= rna_matched[rnaid,]
+
+############### combine dataframe for seurat usage
+
+# pro
+com = intersect(colnames(rna_protein_use), colnames(portein_protein_use))
+rownames(rna_protein_use) = paste0("rna_",c(1:nrow(rna_protein_use)))
+rownames(portein_protein_use) = paste0("pro_",c(1:nrow(portein_protein_use)))
+protein_assay = rbind(rna_protein_use[, com], portein_protein_use[,com])
+
+# rna
+com = intersect(colnames(rna_rna_use), colnames(portein_rna_use))
+rownames(rna_rna_use) = paste0("rna_",c(1:nrow(rna_rna_use)))
+rownames(portein_rna_use) = paste0("pro_",c(1:nrow(portein_rna_use)))
+rna_assay = rbind(rna_rna_use[, com], portein_rna_use[,com])
+
+## start constructing a seurat object
+library(Seurat)
+hbmp_obj = CreateSeuratObject(counts=t(rna_assay),assay="RNA")
+hbmp_obj = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(rna_assay), assay="RNA")
+hbmp_obj[["pro"]]=CreateAssayObject(counts = t(protein_assay[,c(4:50)]))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(protein_assay[,c(4:50)]), assay="pro")
+hbmp_obj@meta.data$nbhd = protein_assay$Neighborhood
+hbmp_obj@meta.data$cmt = protein_assay$Community
+hbmp_obj@meta.data$nbhd_ind = protein_assay$Neighborhood_Ind
+# need to norm
+hbmp_obj = NormalizeData(hbmp_obj)
+hbmp_obj <- ScaleData(hbmp_obj)
+
+Idents(hbmp_obj) = hbmp_obj$nbhd
+hbmp_obj.small <- subset(hbmp_obj, downsample = 700) # roughly 13000 cells
+
+target = unique(hbmp_obj$nbhd)[unique(hbmp_obj$nbhd) %notin% c("CD66+ Mature Epithelial","Glandular Epithelial")]
+target = as.character(target)
+hbmp_obj.small = subset(hbmp_obj.small, idents = target)
+
+library(viridis)
+p = DoHeatmap(hbmp_obj.small, features = sg, assay = "RNA", disp.max = 2.5, disp.min = -1.2) + scale_fill_viridis()
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/plots/nhbd_rna_profile_CL_vird_sharegene.tiff", plot = p, width=12, height=36)
+p
+```
+
+
+
+```{r}
+embedd = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/CL_0719/full21_unique_embedding.csv")
+dfidx1 = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/CL_0719/full21_unique_data1.csv")
+dfidx2 = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/CL_0719/full21.csv")
+
+set.seed(42)
+n1 = dim(dfidx1)[1]
+n2 = dim(dfidx2)[1]
+n3 = n1+1
+n4 = n1+n2
+
+temp_cdx = embedd[c(n3:n4),]
+ridx1 = sample(nrow(temp_cdx), 40000) ## note subsampled
+
+## create duplicated proteion information
+full_cdx = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/CL_proinput.csv")
+
+### protein_cell_protein information
+portein_protein_use = full_cdx[dfidx2$data2+1,]
+portein_protein_use = portein_protein_use[ridx1,]
+
+### rna_cell_protein information
+rna_matched = full_cdx[dfidx2$data2+1,]
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_protein_use= rna_matched[rnaid,]
+
+#### rna related
+full_rna = readMM("/home/bkzhu/MaxFuse/hubmap_phase2/scripts/CL_rnainput.txt.mtx")
+name = read.csv('/home/bkzhu/MaxFuse/production/hubmap/match/data/SB_immune_rna_names.csv')[,"names"]
+colnames(full_rna) = name
+vg = read.csv("/home/bkzhu/MaxFuse/hubmap_phase2/match/output/CL_0719/variable_genes.csv")
+target_genes = sg
+full_rna_sub = full_rna[,target_genes]
+
+
+### protein_cell_rna information
+portein_rna_use = full_rna_sub[dfidx2$data1+1,]
+portein_rna_use = portein_rna_use[ridx1,]
+portein_rna_use = as.data.frame(portein_rna_use)
+
+### rna_cell_rna information
+rna_matched = full_rna_sub[dfidx2$data1+1,]
+rna_matched = as.data.frame(rna_matched)
+rna_matched$data1 = dfidx2$data1
+rnaid = match(dfidx1$data1, rna_matched$data1)
+rna_rna_use= rna_matched[rnaid,]
+
+############### combine dataframe for seurat usage
+
+# pro
+com = intersect(colnames(rna_protein_use), colnames(portein_protein_use))
+rownames(rna_protein_use) = paste0("rna_",c(1:nrow(rna_protein_use)))
+rownames(portein_protein_use) = paste0("pro_",c(1:nrow(portein_protein_use)))
+protein_assay = rbind(rna_protein_use[, com], portein_protein_use[,com])
+
+# rna
+com = intersect(colnames(rna_rna_use), colnames(portein_rna_use))
+rownames(rna_rna_use) = paste0("rna_",c(1:nrow(rna_rna_use)))
+rownames(portein_rna_use) = paste0("pro_",c(1:nrow(portein_rna_use)))
+rna_assay = rbind(rna_rna_use[, com], portein_rna_use[,com])
+
+## start constructing a seurat object
+library(Seurat)
+hbmp_obj = CreateSeuratObject(counts=t(rna_assay),assay="RNA")
+hbmp_obj = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(rna_assay), assay="RNA")
+hbmp_obj[["pro"]]=CreateAssayObject(counts = t(protein_assay[,c(4:50)]))
+hbmp_obj  = SetAssayData(object = hbmp_obj, slot = "data", new.data = t(protein_assay[,c(4:50)]), assay="pro")
+hbmp_obj@meta.data$nbhd = protein_assay$Neighborhood
+hbmp_obj@meta.data$cmt = protein_assay$Community
+hbmp_obj@meta.data$nbhd_ind = protein_assay$Neighborhood_Ind
+# need to norm
+hbmp_obj = NormalizeData(hbmp_obj)
+hbmp_obj <- ScaleData(hbmp_obj)
+
+Idents(hbmp_obj) = hbmp_obj$nbhd
+hbmp_obj.small <- subset(hbmp_obj, downsample = 700) # roughly 13000 cells
+
+target = unique(hbmp_obj$nbhd)[unique(hbmp_obj$nbhd) %notin% c("CD66+ Mature Epithelial","Glandular Epithelial")]
+target = as.character(target)
+hbmp_obj.small = subset(hbmp_obj.small, idents = target)
+
+library(viridis)
+p = DoHeatmap(hbmp_obj.small, features = sg, assay = "RNA", disp.max = 2.5, disp.min = -1.2) + scale_fill_viridis()
+ggsave("/home/bkzhu/MaxFuse/hubmap_phase2/plots/nhbd_rna_profile_CL_vird_sharegenes.tiff", plot = p, width=12, height=36)
+p
+```
+
+
+Please contact Bokai Zhu: bkzhu@stanford.edu if you find anything that is not clear in this code.
