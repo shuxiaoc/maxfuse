@@ -25,6 +25,7 @@ dependencies = [
     "scipy",
     "scikit-learn",
     "matplotlib",
+    "requests",
 ]
 
 [project.urls]
