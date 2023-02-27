@@ -1,4 +1,4 @@
-This folder contains the analysis performed related to MaxFuse in the paper "High resolution single cell maps reveals distinct cell organization and function across different regions of the human intestine".
+This folder contains the analysis performed related to MaxFuse in the paper **"High resolution single cell maps reveals distinct cell organization and function across different regions of the human intestine"**.
 
 Note this set analysis used the development version of Maxfuse, also deposited in the [folder](https://github.com/shuxiaoc/maxfuse/tree/main/Archive/MaxFuse_devo/09302022V).
 
