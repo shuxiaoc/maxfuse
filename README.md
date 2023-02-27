@@ -12,8 +12,13 @@ This work has been led by Shuxiao Chen from [Zongming Lab](http://www-stat.whart
 <img src="https://github.com/shuxiaoc/maxfuse/blob/main/media/fig1.png" width="800" height="280">
 
 ## Installation
+MaxFuse is hosted on `pypi` and can be installed via `pip`. We recommend working with a fresh virtual environment. In the following example we use conda.
 
-installation instruction here. update once @shuxiao uploaded the python code to pypi.
+```
+conda create -n maxfuse python=3.8
+conda activate maxfuse
+python -m pip install maxfuse
+```
 
 ## Vignettes
 
