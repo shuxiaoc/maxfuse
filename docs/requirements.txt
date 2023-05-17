@@ -1,3 +1,4 @@
+maxfuse
 sphinx_autodoc_typehints
 sphinx_copybutton
 nbsphinx
