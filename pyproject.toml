@@ -26,10 +26,6 @@ dependencies = [
     "scikit-learn",
     "matplotlib",
     "requests",
-    "sphinx_autodoc_typehints",
-    "sphinx_copybutton",
-    "nbsphinx",
-    "sphinx_rtd_theme"
 ]
 
 [project.urls]
