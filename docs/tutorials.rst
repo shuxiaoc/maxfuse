@@ -3,5 +3,5 @@ Tutorials
 
 .. toctree::
 
-    citeseq_pbmc.ipynb
-    codex_rnaseq.ipynb
+    citeseq_pbmc_evaluate.ipynb
+    tonsil_codex_rnaseq.ipynb
