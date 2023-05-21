@@ -31,6 +31,10 @@ Example2: Protein -- RNA test run on tissue [here](https://github.com/shuxiaoc/m
 
 Note in cases when integrating single cell data across **protein** and **RNA** modalities, many times the nomenclature of features are different (e.g., mRNA ```ITGAM``` could be named as ```CD11b-1``` when used as antibody). We gathered a [.csv](https://github.com/shuxiaoc/maxfuse/blob/main/docs/protein_gene_conversion.csv) file that covers many of such naming conversions and used during the ```MaxFuse``` process. Of course, this is not a complete conversion, and users should manually add in new naming conversions if they were not included in this .csv file. 
 
+## API documentation
+
+For detailed documentation of ```MaxFuse``` API, you can visit our [readthedocs](https://maxfuse.readthedocs.io/en/latest/) page.
+
 ## Code archive
 
 The analysis presented in the [manuscript](https://www.biorxiv.org/content/10.1101/2023.01.12.523851) was also deposited in this GitHub repository, under this [folder](https://github.com/shuxiaoc/maxfuse/tree/main/Archive). Note in the manuscript we used a development version of ```MaxFuse``` with slightly different grammar and can also be found there. If you require additional information on the analysis/data, please contact Zongming Ma (zongming@wharton.upenn.edu).
