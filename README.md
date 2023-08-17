@@ -37,7 +37,7 @@ For detailed documentation of ```MaxFuse``` API, you can visit our [readthedocs]
 
 ## Code archive
 
-The analysis presented in the [manuscript](https://www.biorxiv.org/content/10.1101/2023.01.12.523851) was also deposited in this GitHub repository, under this [folder](https://github.com/shuxiaoc/maxfuse/tree/main/Archive). Note in the manuscript we used a development version of ```MaxFuse``` with slightly different grammar and can also be found there. If you require additional information on the analysis/data, please contact Zongming Ma (zongming@wharton.upenn.edu).
+The analysis presented in the [manuscript](https://www.biorxiv.org/content/10.1101/2023.01.12.523851) was also deposited in this GitHub repository, under this [folder](https://github.com/shuxiaoc/maxfuse/tree/main/Archive). Note in the manuscript we used a development version of ```MaxFuse``` with slightly different grammar and can also be found there. If you require additional information on the analysis/data, please contact Zongming Ma (zongming.ma@yale.edu).
 
 ## License
 
